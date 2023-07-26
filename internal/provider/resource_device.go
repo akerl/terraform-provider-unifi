@@ -363,7 +363,7 @@ func toPortOverride(data map[string]interface{}) (unifi.DevicePortOverrides, err
 	profileID := data["port_profile_id"].(string)
 	opMode := data["op_mode"].(string)
 	aggregateNumPorts := data["aggregate_num_ports"].(int)
-	nativeNetworkID := d.Get("native_network_id").(string)
+	nativeNetworkID := data["native_network_id"].(string)
 
 	return unifi.DevicePortOverrides{
 		PortIDX:           idx,
