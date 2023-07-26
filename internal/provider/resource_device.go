@@ -103,6 +103,7 @@ func resourceDevice() *schema.Resource {
 							Type:         schema.TypeInt,
 							Optional:     true,
 							ValidateFunc: validation.IntBetween(2, 8),
+							Default:      0,
 							DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
 								if old == strconv.Itoa(0) && new == "" {
 									return true
