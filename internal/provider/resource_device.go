@@ -83,6 +83,11 @@ func resourceDevice() *schema.Resource {
 							Type:        schema.TypeString,
 							Optional:    true,
 						},
+						"native_network_id": {
+							Description: "The ID of network to use as the main network on the port.",
+							Type:        schema.TypeString,
+							Optional:    true,
+						},
 						"port_profile_id": {
 							Description: "ID of the Port Profile used on this port.",
 							Type:        schema.TypeString,
@@ -427,6 +432,7 @@ func toPortOverride(data map[string]any) (unifi.DevicePortOverrides, error) {
 	opMode := data["op_mode"].(string)
 	poeMode := data["poe_mode"].(string)
 	aggregateNumPorts := data["aggregate_num_ports"].(int)
+	nativeNetworkID := data["native_network_id"].(string)
 
 	return unifi.DevicePortOverrides{
 		PortIDX:           idx,
@@ -435,6 +441,7 @@ func toPortOverride(data map[string]any) (unifi.DevicePortOverrides, error) {
 		OpMode:            opMode,
 		PoeMode:           poeMode,
 		AggregateNumPorts: aggregateNumPorts,
+		NATiveNetworkID:   nativeNetworkID,
 	}, nil
 }
 
@@ -446,6 +453,7 @@ func fromPortOverride(po unifi.DevicePortOverrides) (map[string]any, error) {
 		"op_mode":             po.OpMode,
 		"poe_mode":            po.PoeMode,
 		"aggregate_num_ports": po.AggregateNumPorts,
+		"native_network_id":   po.NATiveNetworkID,
 	}, nil
 }
 

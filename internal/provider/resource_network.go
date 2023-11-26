@@ -118,6 +118,12 @@ func resourceNetwork() *schema.Resource {
 				Optional:    true,
 				Default:     "LAN",
 			},
+			"network_isolation_enabled": {
+				Description: "Specifies whether this network should be not allowed to access other local networks.",
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+			},
 			"dhcp_start": {
 				Description:  "The IPv4 address where the DHCP range of addresses starts.",
 				Type:         schema.TypeString,
@@ -276,12 +282,6 @@ func resourceNetwork() *schema.Resource {
 			},
 			"internet_access_enabled": {
 				Description: "Specifies whether this network should be allowed to access the internet or not.",
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     true,
-			},
-			"intra_network_access_enabled": {
-				Description: "Specifies whether this network should be allowed to access other local networks or not.",
 				Type:        schema.TypeBool,
 				Optional:    true,
 				Default:     true,
@@ -496,23 +496,23 @@ func resourceNetworkGetResourceData(d *schema.ResourceData, meta any) (*unifi.Ne
 	}
 
 	return &unifi.Network{
-		Name:              d.Get("name").(string),
-		Purpose:           d.Get("purpose").(string),
-		VLAN:              vlan,
-		IPSubnet:          cidrOneBased(d.Get("subnet").(string)),
-		NetworkGroup:      d.Get("network_group").(string),
-		DHCPDStart:        d.Get("dhcp_start").(string),
-		DHCPDStop:         d.Get("dhcp_stop").(string),
-		DHCPDEnabled:      d.Get("dhcp_enabled").(bool),
-		DHCPDLeaseTime:    d.Get("dhcp_lease").(int),
-		DHCPDBootEnabled:  d.Get("dhcpd_boot_enabled").(bool),
-		DHCPDBootServer:   d.Get("dhcpd_boot_server").(string),
-		DHCPDBootFilename: d.Get("dhcpd_boot_filename").(string),
-		DHCPRelayEnabled:  d.Get("dhcp_relay_enabled").(bool),
-		DomainName:        d.Get("domain_name").(string),
-		IGMPSnooping:      d.Get("igmp_snooping").(bool),
-		MdnsEnabled:       d.Get("multicast_dns").(bool),
-		Enabled:           d.Get("enabled").(bool),
+		Name:                    d.Get("name").(string),
+		Purpose:                 d.Get("purpose").(string),
+		VLAN:                    vlan,
+		IPSubnet:                cidrOneBased(d.Get("subnet").(string)),
+		NetworkGroup:            d.Get("network_group").(string),
+		NetworkIsolationEnabled: d.Get("network_isolation_enabled").(bool),
+		DHCPDStart:              d.Get("dhcp_start").(string),
+		DHCPDStop:               d.Get("dhcp_stop").(string),
+		DHCPDEnabled:            d.Get("dhcp_enabled").(bool),
+		DHCPDLeaseTime:          d.Get("dhcp_lease").(int),
+		DHCPDBootEnabled:        d.Get("dhcpd_boot_enabled").(bool),
+		DHCPDBootServer:         d.Get("dhcpd_boot_server").(string),
+		DHCPDBootFilename:       d.Get("dhcpd_boot_filename").(string),
+		DHCPRelayEnabled:        d.Get("dhcp_relay_enabled").(bool),
+		DomainName:              d.Get("domain_name").(string),
+		IGMPSnooping:            d.Get("igmp_snooping").(bool),
+		MdnsEnabled:             d.Get("multicast_dns").(bool),
 
 		DHCPDDNSEnabled: len(dhcpDNS) > 0,
 		// this is kinda hacky but ¯\_(ツ)_/¯
@@ -661,6 +661,7 @@ func resourceNetworkSetResourceData(
 	d.Set("subnet", cidrZeroBased(resp.IPSubnet))
 	d.Set("network_group", resp.NetworkGroup)
 	d.Set("enabled", resp.Enabled)
+	d.Set("network_isolation_enabled", resp.NetworkIsolationEnabled)
 
 	d.Set("dhcp_dns", dhcpDNS)
 	d.Set("dhcp_enabled", resp.DHCPDEnabled)
