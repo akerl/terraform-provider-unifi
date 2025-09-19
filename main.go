@@ -38,7 +38,7 @@ func main() {
 		serveOpts = append(serveOpts, tf6server.WithManagedDebug())
 	}
 
-	upgradedSdkProvider, err := tf5to6server.UpgradeServer(
+	upgradedSdkProvider, _ := tf5to6server.UpgradeServer(
 		context.Background(),
 		provider.Provider().GRPCProvider,
 	)
