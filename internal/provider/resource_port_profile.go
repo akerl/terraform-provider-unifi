@@ -75,6 +75,12 @@ func resourcePortProfile() *schema.Resource {
 				Optional:    true,
 				Default:     false,
 			},
+			"excluded_networkconf_ids": {
+				Description: "The IDs of networks to block traffic for this port profile.",
+				Type:        schema.TypeSet,
+				Optional:    true,
+				Elem:        &schema.Schema{Type: schema.TypeString},
+			},
 			"forward": {
 				Description: "The type forwarding to use for the port profile. Can be `all`, `native`, `customize` or `disabled`.",
 				Type:        schema.TypeString,
@@ -299,12 +305,18 @@ func resourcePortProfileGetResourceData(d *schema.ResourceData) (*unifi.PortProf
 		return nil, err
 	}
 
+	excludedNetworkIds, err := setToStringSlice(d.Get("excluded_networkconf_ids").(*schema.Set))
+	if err != nil {
+		return nil, err
+	}
+
 	return &unifi.PortProfile{
 		Autoneg:                      d.Get("autoneg").(bool),
 		Dot1XCtrl:                    d.Get("dot1x_ctrl").(string),
 		Dot1XIDleTimeout:             d.Get("dot1x_idle_timeout").(int),
 		EgressRateLimitKbps:          d.Get("egress_rate_limit_kbps").(int),
 		EgressRateLimitKbpsEnabled:   d.Get("egress_rate_limit_kbps_enabled").(bool),
+		ExcludedNetworkIDs:           excludedNetworkIds,
 		Forward:                      d.Get("forward").(string),
 		FullDuplex:                   d.Get("full_duplex").(bool),
 		Isolation:                    d.Get("isolation").(bool),
@@ -348,6 +360,7 @@ func resourcePortProfileSetResourceData(
 	d.Set("dot1x_idle_timeout", resp.Dot1XIDleTimeout)
 	d.Set("egress_rate_limit_kbps", resp.EgressRateLimitKbps)
 	d.Set("egress_rate_limit_kbps_enabled", resp.EgressRateLimitKbpsEnabled)
+	d.Set("excluded_networkconf_ids", stringSliceToSet(resp.ExcludedNetworkIDs))
 	d.Set("forward", resp.Forward)
 	d.Set("full_duplex", resp.FullDuplex)
 	d.Set("isolation", resp.Isolation)
