@@ -275,6 +275,9 @@ func resourceWLANGetResourceData(d *schema.ResourceData, meta any) (*unifi.WLAN,
 	case "open":
 		passphrase = ""
 	}
+	if passphrase == "skip" {
+		passphrase = ""
+	}
 
 	pmf := d.Get("pmf_mode").(string)
 	wpa3 := d.Get("wpa3_support").(bool)
@@ -303,6 +306,11 @@ func resourceWLANGetResourceData(d *schema.ResourceData, meta any) (*unifi.WLAN,
 		return nil, fmt.Errorf("WPA 3 transition mode requires pmf_mode to be turned on")
 	} else if wpa3 && !wpa3Transition && pmf != "required" {
 		return nil, fmt.Errorf("for WPA 3 you must set pmf_mode to required")
+	}
+
+	inputPassphrase := d.Get("passphrase").(string)
+	if inputPassphrase == "skip" {
+		passphrase = "skip"
 	}
 
 	macFilterEnabled := d.Get("mac_filter_enabled").(bool)
