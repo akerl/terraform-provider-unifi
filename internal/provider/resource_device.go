@@ -363,7 +363,13 @@ func toPortOverride(data map[string]interface{}) (unifi.DevicePortOverrides, err
 	profileID := data["port_profile_id"].(string)
 	opMode := data["op_mode"].(string)
 	poeMode := data["poe_mode"].(string)
-	aggregateMembers := data["aggregate_members"].([]int)
+	aggregateMembersRaw := data["aggregate_members"].([]interface{})
+	aggregateMembers := make([]int, 0, len(aggregateMembersRaw))
+
+	for i, v := range aggregateMembersRaw {
+		aggregateMembers[i] = v.(int)
+	}
+
 	nativeNetworkID := data["native_network_id"].(string)
 
 	return unifi.DevicePortOverrides{
