@@ -1,4 +1,4 @@
-package git // import "github.com/docker/docker/builder/remotecontext/git"
+package git
 
 import (
 	"net/http"
@@ -35,7 +35,6 @@ func WithIsolatedConfig(v bool) CloneOption {
 // will be under "docker-build-git"
 func Clone(remoteURL string, opts ...CloneOption) (string, error) {
 	repo, err := parseRemoteURL(remoteURL)
-
 	if err != nil {
 		return "", err
 	}
@@ -47,7 +46,7 @@ func Clone(remoteURL string, opts ...CloneOption) (string, error) {
 	return repo.clone()
 }
 
-func (repo gitRepo) clone() (checkoutDir string, err error) {
+func (repo gitRepo) clone() (checkoutDir string, retErr error) {
 	fetch := fetchArgs(repo.remote, repo.ref)
 
 	root, err := os.MkdirTemp("", "docker-build-git")
@@ -56,8 +55,8 @@ func (repo gitRepo) clone() (checkoutDir string, err error) {
 	}
 
 	defer func() {
-		if err != nil {
-			os.RemoveAll(root)
+		if retErr != nil {
+			_ = os.RemoveAll(root)
 		}
 	}()
 

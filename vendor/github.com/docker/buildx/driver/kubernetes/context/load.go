@@ -23,6 +23,7 @@ type EndpointMeta struct {
 	AuthProvider     *clientcmdapi.AuthProviderConfig `json:",omitempty"`
 	Exec             *clientcmdapi.ExecConfig         `json:",omitempty"`
 	UsernamePassword *UsernamePassword                `json:"usernamePassword,omitempty"`
+	Token            string                           `json:"token,omitempty"`
 }
 
 // UsernamePassword contains username/password auth info
@@ -42,7 +43,7 @@ type Endpoint struct {
 
 func init() {
 	command.RegisterDefaultStoreEndpoints(
-		store.EndpointTypeGetter(KubernetesEndpoint, func() interface{} { return &EndpointMeta{} }),
+		store.EndpointTypeGetter(KubernetesEndpoint, func() any { return &EndpointMeta{} }),
 	)
 }
 
@@ -77,6 +78,9 @@ func (c *Endpoint) KubernetesConfig() clientcmd.ClientConfig {
 		authInfo.Username = c.UsernamePassword.Username
 		authInfo.Password = c.UsernamePassword.Password
 	}
+	if c.Token != "" {
+		authInfo.Token = c.Token
+	}
 	authInfo.AuthProvider = c.AuthProvider
 	authInfo.Exec = c.Exec
 	cfg.Clusters["cluster"] = cluster
@@ -92,7 +96,7 @@ func (c *Endpoint) KubernetesConfig() clientcmd.ClientConfig {
 
 // ResolveDefault returns endpoint metadata for the default Kubernetes
 // endpoint, which is derived from the env-based kubeconfig.
-func (c *EndpointMeta) ResolveDefault() (interface{}, *store.EndpointTLSData, error) {
+func (c *EndpointMeta) ResolveDefault() (any, *store.EndpointTLSData, error) {
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
 		kubeconfig = filepath.Join(homedir.Get(), ".kube/config")
@@ -163,11 +167,12 @@ func NewKubernetesConfig(configPath string) clientcmd.ClientConfig {
 // ConfigFromEndpoint loads kubernetes config from endpoint
 func ConfigFromEndpoint(endpointName string, s store.Reader) (clientcmd.ClientConfig, error) {
 	if strings.HasPrefix(endpointName, "kubernetes://") {
+		rules := clientcmd.NewDefaultClientConfigLoadingRules()
 		u, _ := url.Parse(endpointName)
 		if kubeconfig := u.Query().Get("kubeconfig"); kubeconfig != "" {
-			_ = os.Setenv(clientcmd.RecommendedConfigPathEnvVar, kubeconfig)
+			rules.Precedence = append(rules.Precedence, kubeconfig)
+			rules.ExplicitPath = kubeconfig
 		}
-		rules := clientcmd.NewDefaultClientConfigLoadingRules()
 		apiConfig, err := rules.Load()
 		if err != nil {
 			return nil, err

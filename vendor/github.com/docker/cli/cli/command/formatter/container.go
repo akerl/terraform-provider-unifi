@@ -1,14 +1,18 @@
+// FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
+//go:build go1.22
+
 package formatter
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/docker/distribution/reference"
-	"github.com/docker/docker/api/types"
+	"github.com/distribution/reference"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/go-units"
 )
@@ -63,10 +67,10 @@ ports: {{- pad .Ports 1 0}}
 }
 
 // ContainerWrite renders the context for a list of containers
-func ContainerWrite(ctx Context, containers []types.Container) error {
+func ContainerWrite(ctx Context, containers []container.Summary) error {
 	render := func(format func(subContext SubContext) error) error {
-		for _, container := range containers {
-			err := format(&ContainerContext{trunc: ctx.Trunc, c: container})
+		for _, ctr := range containers {
+			err := format(&ContainerContext{trunc: ctx.Trunc, c: ctr})
 			if err != nil {
 				return err
 			}
@@ -80,13 +84,13 @@ func ContainerWrite(ctx Context, containers []types.Container) error {
 type ContainerContext struct {
 	HeaderContext
 	trunc bool
-	c     types.Container
+	c     container.Summary
 
 	// FieldsUsed is used in the pre-processing step to detect which fields are
 	// used in the template. It's currently only used to detect use of the .Size
 	// field which (if used) automatically sets the '--size' option when making
 	// the API call.
-	FieldsUsed map[string]interface{}
+	FieldsUsed map[string]any
 }
 
 // NewContainerContext creates a new context for rendering containers
@@ -189,7 +193,9 @@ func (c *ContainerContext) Command() string {
 	return strconv.Quote(command)
 }
 
-// CreatedAt returns the "Created" date/time of the container as a unix timestamp.
+// CreatedAt returns the formatted string representing the container's creation date/time.
+// The format may include nanoseconds if present.
+// e.g. "2006-01-02 15:04:05.999999999 -0700 MST" or "2006-01-02 15:04:05 -0700 MST"
 func (c *ContainerContext) CreatedAt() string {
 	return time.Unix(c.c.Created, 0).String()
 }
@@ -226,7 +232,7 @@ func (c *ContainerContext) Status() string {
 // Size returns the container's size and virtual size (e.g. "2B (virtual 21.5MB)")
 func (c *ContainerContext) Size() string {
 	if c.FieldsUsed == nil {
-		c.FieldsUsed = map[string]interface{}{}
+		c.FieldsUsed = map[string]any{}
 	}
 	c.FieldsUsed["Size"] = struct{}{}
 	srw := units.HumanSizeWithPrecision(float64(c.c.SizeRw), 3)
@@ -245,9 +251,9 @@ func (c *ContainerContext) Labels() string {
 		return ""
 	}
 
-	var joinLabels []string
+	joinLabels := make([]string, 0, len(c.c.Labels))
 	for k, v := range c.c.Labels {
-		joinLabels = append(joinLabels, fmt.Sprintf("%s=%s", k, v))
+		joinLabels = append(joinLabels, k+"="+v)
 	}
 	return strings.Join(joinLabels, ",")
 }
@@ -265,7 +271,7 @@ func (c *ContainerContext) Label(name string) string {
 // If the trunc option is set, names can be truncated (ellipsized).
 func (c *ContainerContext) Mounts() string {
 	var name string
-	var mounts []string
+	mounts := make([]string, 0, len(c.c.Mounts))
 	for _, m := range c.c.Mounts {
 		if m.Name == "" {
 			name = m.Source
@@ -289,7 +295,7 @@ func (c *ContainerContext) LocalVolumes() string {
 		}
 	}
 
-	return fmt.Sprintf("%d", count)
+	return strconv.Itoa(count)
 }
 
 // Networks returns a comma-separated string of networks that the container is
@@ -299,7 +305,7 @@ func (c *ContainerContext) Networks() string {
 		return ""
 	}
 
-	networks := []string{}
+	networks := make([]string, 0, len(c.c.NetworkSettings.Networks))
 	for k := range c.c.NetworkSettings.Networks {
 		networks = append(networks, k)
 	}
@@ -310,13 +316,13 @@ func (c *ContainerContext) Networks() string {
 // DisplayablePorts returns formatted string representing open ports of container
 // e.g. "0.0.0.0:80->9090/tcp, 9988/tcp"
 // it's used by command 'docker ps'
-func DisplayablePorts(ports []types.Port) string {
+func DisplayablePorts(ports []container.Port) string {
 	type portGroup struct {
 		first uint16
 		last  uint16
 	}
 	groupMap := make(map[string]*portGroup)
-	var result []string
+	var result []string //nolint:prealloc
 	var hostMappings []string
 	var groupMapKeys []string
 	sort.Slice(ports, func(i, j int) bool {
@@ -328,10 +334,11 @@ func DisplayablePorts(ports []types.Port) string {
 		portKey := port.Type
 		if port.IP != "" {
 			if port.PublicPort != current {
-				hostMappings = append(hostMappings, fmt.Sprintf("%s:%d->%d/%s", port.IP, port.PublicPort, port.PrivatePort, port.Type))
+				hAddrPort := net.JoinHostPort(port.IP, strconv.Itoa(int(port.PublicPort)))
+				hostMappings = append(hostMappings, fmt.Sprintf("%s->%d/%s", hAddrPort, port.PrivatePort, port.Type))
 				continue
 			}
-			portKey = fmt.Sprintf("%s/%s", port.IP, port.Type)
+			portKey = port.IP + "/" + port.Type
 		}
 		group := groupMap[portKey]
 
@@ -370,12 +377,12 @@ func formGroup(key string, start, last uint16) string {
 		group = fmt.Sprintf("%s-%d", group, last)
 	}
 	if ip != "" {
-		group = fmt.Sprintf("%s:%s->%s", ip, group, group)
+		group = fmt.Sprintf("%s->%s", net.JoinHostPort(ip, group), group)
 	}
-	return fmt.Sprintf("%s/%s", group, groupType)
+	return group + "/" + groupType
 }
 
-func comparePorts(i, j types.Port) bool {
+func comparePorts(i, j container.Port) bool {
 	if i.PrivatePort != j.PrivatePort {
 		return i.PrivatePort < j.PrivatePort
 	}

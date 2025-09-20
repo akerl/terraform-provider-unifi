@@ -415,3 +415,5 @@ require (
 )
 
 replace github.com/versent/saml2aws/v2 v2.35.0 => github.com/marcottedan/saml2aws/v2 v2.35.2-0.20230216212309-3bc67c7da136
+
+replace github.com/paultyng/go-unifi v1.34.0 => github.com/akerl/go-unifi v0.0.0-20250829003042-b075736b8d38

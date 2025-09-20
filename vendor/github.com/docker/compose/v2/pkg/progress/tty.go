@@ -84,21 +84,25 @@ func (w *ttyWriter) event(e Event) {
 		last := w.events[e.ID]
 		switch e.Status {
 		case Done, Error, Warning:
-			if last.endTime.IsZero() {
+			if last.Status != e.Status {
 				last.stop()
 			}
 		case Working:
-			if !last.endTime.IsZero() {
-				// already done, don't overwrite
-				return
-			}
+			last.hasMore()
 		}
 		last.Status = e.Status
 		last.Text = e.Text
 		last.StatusText = e.StatusText
-		last.Total = e.Total
-		last.Current = e.Current
-		last.Percent = e.Percent
+		// progress can only go up
+		if e.Total > last.Total {
+			last.Total = e.Total
+		}
+		if e.Current > last.Current {
+			last.Current = e.Current
+		}
+		if e.Percent > last.Percent {
+			last.Percent = e.Percent
+		}
 		// allow set/unset of parent, but not swapping otherwise prompt is flickering
 		if last.ParentID == "" || e.ParentID == "" {
 			last.ParentID = e.ParentID
@@ -136,7 +140,7 @@ func (w *ttyWriter) printTailEvents() {
 	w.mtx.Lock()
 	defer w.mtx.Unlock()
 	for _, msg := range w.tailEvents {
-		fmt.Fprintln(w.out, msg)
+		_, _ = fmt.Fprintln(w.out, msg)
 	}
 }
 
@@ -155,17 +159,19 @@ func (w *ttyWriter) print() { //nolint:gocyclo
 		b = b.Down(1)
 	}
 	w.repeated = true
-	fmt.Fprint(w.out, b.Column(0).ANSI)
+	_, _ = fmt.Fprint(w.out, b.Column(0).ANSI)
 
 	// Hide the cursor while we are printing
-	fmt.Fprint(w.out, aec.Hide)
-	defer fmt.Fprint(w.out, aec.Show)
+	_, _ = fmt.Fprint(w.out, aec.Hide)
+	defer func() {
+		_, _ = fmt.Fprint(w.out, aec.Show)
+	}()
 
-	firstLine := fmt.Sprintf("[+] %s %d/%d", w.progressTitle, numDone(w.events), w.numLines)
+	firstLine := fmt.Sprintf("[+] %s %d/%d", w.progressTitle, numDone(w.events), len(w.events))
 	if w.numLines != 0 && numDone(w.events) == w.numLines {
 		firstLine = DoneColor(firstLine)
 	}
-	fmt.Fprintln(w.out, firstLine)
+	_, _ = fmt.Fprintln(w.out, firstLine)
 
 	var statusPadding int
 	for _, v := range w.eventIDs {
@@ -189,7 +195,7 @@ func (w *ttyWriter) print() { //nolint:gocyclo
 			continue
 		}
 		line := w.lineText(event, "", terminalWidth, statusPadding, w.dryRun)
-		fmt.Fprint(w.out, line)
+		_, _ = fmt.Fprint(w.out, line)
 		numLines++
 		for _, v := range w.eventIDs {
 			ev := w.events[v]
@@ -198,14 +204,14 @@ func (w *ttyWriter) print() { //nolint:gocyclo
 					continue
 				}
 				line := w.lineText(ev, "  ", terminalWidth, statusPadding, w.dryRun)
-				fmt.Fprint(w.out, line)
+				_, _ = fmt.Fprint(w.out, line)
 				numLines++
 			}
 		}
 	}
 	for i := numLines; i < w.numLines; i++ {
 		if numLines < goterm.Height()-2 {
-			fmt.Fprintln(w.out, strings.Repeat(" ", terminalWidth))
+			_, _ = fmt.Fprintln(w.out, strings.Repeat(" ", terminalWidth))
 			numLines++
 		}
 	}
@@ -228,28 +234,46 @@ func (w *ttyWriter) lineText(event Event, pad string, terminalWidth, statusPaddi
 	elapsed := endTime.Sub(event.startTime).Seconds()
 
 	var (
-		total      int64
-		current    int64
-		completion []string
+		hideDetails bool
+		total       int64
+		current     int64
+		completion  []string
 	)
 
-	for _, v := range w.eventIDs {
-		ev := w.events[v]
-		if ev.ParentID == event.ID {
-			total += ev.Total
-			current += ev.Current
-			completion = append(completion, percentChars[(len(percentChars)-1)*ev.Percent/100])
+	// only show the aggregated progress while the root operation is in-progress
+	if parent := event; parent.Status == Working {
+		for _, v := range w.eventIDs {
+			child := w.events[v]
+			if child.ParentID == parent.ID {
+				if child.Status == Working && child.Total == 0 {
+					// we don't have totals available for all the child events
+					// so don't show the total progress yet
+					hideDetails = true
+				}
+				total += child.Total
+				current += child.Current
+				completion = append(completion, percentChars[(len(percentChars)-1)*child.Percent/100])
+			}
 		}
+	}
+
+	// don't try to show detailed progress if we don't have any idea
+	if total == 0 {
+		hideDetails = true
 	}
 
 	var txt string
 	if len(completion) > 0 {
-		txt = fmt.Sprintf("%s %s [%s] %7s/%-7s %s",
+		var details string
+		if !hideDetails {
+			details = fmt.Sprintf(" %7s / %-7s", units.HumanSize(float64(current)), units.HumanSize(float64(total)))
+		}
+		txt = fmt.Sprintf("%s [%s]%s %s",
 			event.ID,
-			CountColor(fmt.Sprintf("%d layers", len(completion))),
 			SuccessColor(strings.Join(completion, "")),
-			units.HumanSize(float64(current)), units.HumanSize(float64(total)),
-			event.Text)
+			details,
+			event.Text,
+		)
 	} else {
 		txt = fmt.Sprintf("%s %s", event.ID, event.Text)
 	}
@@ -321,6 +345,4 @@ func lenAnsi(s string) int {
 	return length
 }
 
-var (
-	percentChars = strings.Split("⠀⡀⣀⣄⣤⣦⣶⣷⣿", "")
-)
+var percentChars = strings.Split("⠀⡀⣀⣄⣤⣦⣶⣷⣿", "")

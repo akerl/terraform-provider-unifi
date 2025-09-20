@@ -11,11 +11,11 @@ import (
 type Writer interface {
 	Write(*client.SolveStatus)
 	WriteBuildRef(string, string)
-	ValidateLogSource(digest.Digest, interface{}) bool
-	ClearLogSource(interface{})
+	ValidateLogSource(digest.Digest, any) bool
+	ClearLogSource(any)
 }
 
-func Write(w Writer, name string, f func() error) {
+func Write(w Writer, name string, f func() error) error {
 	dgst := digest.FromBytes([]byte(identity.NewID()))
 	tm := time.Now()
 
@@ -40,6 +40,8 @@ func Write(w Writer, name string, f func() error) {
 	w.Write(&client.SolveStatus{
 		Vertexes: []*client.Vertex{&vtx2},
 	})
+
+	return err
 }
 
 func WriteBuildRef(w Writer, target string, ref string) {

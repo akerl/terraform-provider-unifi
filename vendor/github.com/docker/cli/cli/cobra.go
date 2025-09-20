@@ -3,16 +3,12 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	pluginmanager "github.com/docker/cli/cli-plugins/manager"
+	"github.com/docker/cli/cli-plugins/metadata"
 	"github.com/docker/cli/cli/command"
-	"github.com/docker/cli/cli/config"
 	cliflags "github.com/docker/cli/cli/flags"
-	"github.com/docker/docker/pkg/homedir"
-	"github.com/docker/docker/registry"
 	"github.com/fvbommel/sortorder"
 	"github.com/moby/term"
 	"github.com/morikuni/aec"
@@ -23,12 +19,9 @@ import (
 
 // setupCommonRootCommand contains the setup common to
 // SetupRootCommand and SetupPluginRootCommand.
-func setupCommonRootCommand(rootCmd *cobra.Command) (*cliflags.ClientOptions, *pflag.FlagSet, *cobra.Command) {
+func setupCommonRootCommand(rootCmd *cobra.Command) (*cliflags.ClientOptions, *cobra.Command) {
 	opts := cliflags.NewClientOptions()
-	flags := rootCmd.Flags()
-
-	flags.StringVar(&opts.ConfigDir, "config", config.Dir(), "Location of client config files")
-	opts.InstallFlags(flags)
+	opts.InstallFlags(rootCmd.Flags())
 
 	cobra.AddTemplateFunc("add", func(a, b int) int { return a + b })
 	cobra.AddTemplateFunc("hasAliases", hasAliases)
@@ -58,7 +51,7 @@ func setupCommonRootCommand(rootCmd *cobra.Command) (*cliflags.ClientOptions, *p
 	rootCmd.SetHelpCommand(helpCommand)
 
 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Print usage")
-	rootCmd.PersistentFlags().MarkShorthandDeprecated("help", "please use --help")
+	rootCmd.PersistentFlags().MarkShorthandDeprecated("help", "use --help")
 	rootCmd.PersistentFlags().Lookup("help").Hidden = true
 
 	rootCmd.Annotations = map[string]string{
@@ -66,27 +59,20 @@ func setupCommonRootCommand(rootCmd *cobra.Command) (*cliflags.ClientOptions, *p
 		"docs.code-delimiter": `"`, // https://github.com/docker/cli-docs-tool/blob/77abede22166eaea4af7335096bdcedd043f5b19/annotation/annotation.go#L20-L22
 	}
 
-	// Configure registry.CertsDir() when running in rootless-mode
-	if os.Getenv("ROOTLESSKIT_STATE_DIR") != "" {
-		if configHome, err := homedir.GetConfigHome(); err == nil {
-			registry.SetCertsDir(filepath.Join(configHome, "docker/certs.d"))
-		}
-	}
-
-	return opts, flags, helpCommand
+	return opts, helpCommand
 }
 
 // SetupRootCommand sets default usage, help, and error handling for the
 // root command.
-func SetupRootCommand(rootCmd *cobra.Command) (*cliflags.ClientOptions, *pflag.FlagSet, *cobra.Command) {
+func SetupRootCommand(rootCmd *cobra.Command) (opts *cliflags.ClientOptions, helpCmd *cobra.Command) {
 	rootCmd.SetVersionTemplate("Docker version {{.Version}}\n")
 	return setupCommonRootCommand(rootCmd)
 }
 
 // SetupPluginRootCommand sets default usage, help and error handling for a plugin root command.
 func SetupPluginRootCommand(rootCmd *cobra.Command) (*cliflags.ClientOptions, *pflag.FlagSet) {
-	opts, flags, _ := setupCommonRootCommand(rootCmd)
-	return opts, flags
+	opts, _ := setupCommonRootCommand(rootCmd)
+	return opts, rootCmd.Flags()
 }
 
 // FlagErrorFunc prints an error message which matches the format of the
@@ -96,12 +82,8 @@ func FlagErrorFunc(cmd *cobra.Command, err error) error {
 		return nil
 	}
 
-	usage := ""
-	if cmd.HasSubCommands() {
-		usage = "\n\n" + cmd.UsageString()
-	}
 	return StatusError{
-		Status:     fmt.Sprintf("%s\nSee '%s --help'.%s", err, cmd.CommandPath(), usage),
+		Status:     fmt.Sprintf("%s\n\nUsage:  %s\n\nRun '%s --help' for more information", err, cmd.UseLine(), cmd.CommandPath()),
 		StatusCode: 125,
 	}
 }
@@ -180,7 +162,7 @@ func (tcmd *TopLevelCommand) HandleGlobalFlags() (*cobra.Command, []string, erro
 }
 
 // Initialize finalises global option parsing and initializes the docker client.
-func (tcmd *TopLevelCommand) Initialize(ops ...command.InitializeOpt) error {
+func (tcmd *TopLevelCommand) Initialize(ops ...command.CLIOption) error {
 	tcmd.opts.SetDefaultOptions(tcmd.flags)
 	return tcmd.dockerCli.Initialize(tcmd.opts, ops...)
 }
@@ -260,7 +242,7 @@ func hasAdditionalHelp(cmd *cobra.Command) bool {
 }
 
 func isPlugin(cmd *cobra.Command) bool {
-	return pluginmanager.IsPluginCommand(cmd)
+	return cmd.Annotations[metadata.CommandAnnotationPlugin] == "true"
 }
 
 func hasAliases(cmd *cobra.Command) bool {
@@ -345,8 +327,10 @@ func operationSubCommands(cmd *cobra.Command) []*cobra.Command {
 	return cmds
 }
 
+const defaultTermWidth = 80
+
 func wrappedFlagUsages(cmd *cobra.Command) string {
-	width := 80
+	width := defaultTermWidth
 	if ws, err := term.GetWinsize(0); err == nil {
 		width = int(ws.Width)
 	}
@@ -362,9 +346,9 @@ func decoratedName(cmd *cobra.Command) string {
 }
 
 func vendorAndVersion(cmd *cobra.Command) string {
-	if vendor, ok := cmd.Annotations[pluginmanager.CommandAnnotationPluginVendor]; ok && isPlugin(cmd) {
+	if vendor, ok := cmd.Annotations[metadata.CommandAnnotationPluginVendor]; ok && isPlugin(cmd) {
 		version := ""
-		if v, ok := cmd.Annotations[pluginmanager.CommandAnnotationPluginVersion]; ok && v != "" {
+		if v, ok := cmd.Annotations[metadata.CommandAnnotationPluginVersion]; ok && v != "" {
 			version = ", " + v
 		}
 		return fmt.Sprintf("(%s%s)", vendor, version)
@@ -423,7 +407,7 @@ func invalidPlugins(cmd *cobra.Command) []*cobra.Command {
 }
 
 func invalidPluginReason(cmd *cobra.Command) string {
-	return cmd.Annotations[pluginmanager.CommandAnnotationPluginInvalid]
+	return cmd.Annotations[metadata.CommandAnnotationPluginInvalid]
 }
 
 const usageTemplate = `Usage:
@@ -474,7 +458,7 @@ Common Commands:
 Management Commands:
 
 {{- range managementSubCommands . }}
-  {{rpad (decoratedName .) (add .NamePadding 1)}}{{.Short}}{{ if isPlugin .}} {{vendorAndVersion .}}{{ end}}
+  {{rpad (decoratedName .) (add .NamePadding 1)}}{{.Short}}
 {{- end}}
 
 {{- end}}
@@ -483,7 +467,7 @@ Management Commands:
 Swarm Commands:
 
 {{- range orchestratorSubCommands . }}
-  {{rpad (decoratedName .) (add .NamePadding 1)}}{{.Short}}{{ if isPlugin .}} {{vendorAndVersion .}}{{ end}}
+  {{rpad (decoratedName .) (add .NamePadding 1)}}{{.Short}}
 {{- end}}
 
 {{- end}}
@@ -526,4 +510,4 @@ Run '{{.CommandPath}} COMMAND --help' for more information on a command.
 `
 
 const helpTemplate = `
-{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`
+{{- if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`

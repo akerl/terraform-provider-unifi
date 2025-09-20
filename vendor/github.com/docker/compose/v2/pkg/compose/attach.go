@@ -18,13 +18,14 @@ package compose
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
-	"github.com/compose-spec/compose-go/types"
+	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/cli/cli/streams"
-	moby "github.com/docker/docker/api/types"
+	containerType "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/moby/term"
 
@@ -41,17 +42,17 @@ func (s *composeService) attach(ctx context.Context, project *types.Project, lis
 		return containers, nil
 	}
 
-	containers.sorted() // This enforce predictable colors assignment
+	containers.sorted() // This enforces predictable colors assignment
 
 	var names []string
 	for _, c := range containers {
 		names = append(names, getContainerNameWithoutProject(c))
 	}
 
-	fmt.Fprintf(s.stdout(), "Attaching to %s\n", strings.Join(names, ", "))
+	_, _ = fmt.Fprintf(s.stdout(), "Attaching to %s\n", strings.Join(names, ", "))
 
-	for _, container := range containers {
-		err := s.attachContainer(ctx, container, listener)
+	for _, ctr := range containers {
+		err := s.attachContainer(ctx, ctr, listener)
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +60,7 @@ func (s *composeService) attach(ctx context.Context, project *types.Project, lis
 	return containers, err
 }
 
-func (s *composeService) attachContainer(ctx context.Context, container moby.Container, listener api.ContainerEventListener) error {
+func (s *composeService) attachContainer(ctx context.Context, container containerType.Summary, listener api.ContainerEventListener) error {
 	serviceName := container.Labels[api.ServiceLabel]
 	containerName := getContainerNameWithoutProject(container)
 
@@ -98,11 +99,9 @@ func (s *composeService) attachContainer(ctx context.Context, container moby.Con
 	return err
 }
 
-func (s *composeService) attachContainerStreams(ctx context.Context, container string, tty bool, stdin io.ReadCloser, stdout, stderr io.Writer) (func(), chan bool, error) {
+func (s *composeService) attachContainerStreams(ctx context.Context, container string, tty bool, stdin io.ReadCloser, stdout, stderr io.WriteCloser) (func(), chan bool, error) {
 	detached := make(chan bool)
-	var (
-		restore = func() { /* noop */ }
-	)
+	restore := func() { /* noop */ }
 	if stdin != nil {
 		in := streams.NewIn(stdin)
 		if in.IsTerminal() {
@@ -126,13 +125,13 @@ func (s *composeService) attachContainerStreams(ctx context.Context, container s
 		if stdin != nil {
 			stdin.Close() //nolint:errcheck
 		}
-		streamOut.Close() //nolint:errcheck
 	}()
 
 	if streamIn != nil && stdin != nil {
 		go func() {
 			_, err := io.Copy(streamIn, stdin)
-			if _, ok := err.(term.EscapeError); ok {
+			var escapeErr term.EscapeError
+			if errors.As(err, &escapeErr) {
 				close(detached)
 			}
 		}()
@@ -140,6 +139,9 @@ func (s *composeService) attachContainerStreams(ctx context.Context, container s
 
 	if stdout != nil {
 		go func() {
+			defer stdout.Close()    //nolint:errcheck
+			defer stderr.Close()    //nolint:errcheck
+			defer streamOut.Close() //nolint:errcheck
 			if tty {
 				io.Copy(stdout, streamOut) //nolint:errcheck
 			} else {
@@ -153,7 +155,7 @@ func (s *composeService) attachContainerStreams(ctx context.Context, container s
 func (s *composeService) getContainerStreams(ctx context.Context, container string) (io.WriteCloser, io.ReadCloser, error) {
 	var stdout io.ReadCloser
 	var stdin io.WriteCloser
-	cnx, err := s.apiClient().ContainerAttach(ctx, container, moby.ContainerAttachOptions{
+	cnx, err := s.apiClient().ContainerAttach(ctx, container, containerType.AttachOptions{
 		Stream: true,
 		Stdin:  true,
 		Stdout: true,
@@ -167,7 +169,7 @@ func (s *composeService) getContainerStreams(ctx context.Context, container stri
 	}
 
 	// Fallback to logs API
-	logs, err := s.apiClient().ContainerLogs(ctx, container, moby.ContainerLogsOptions{
+	logs, err := s.apiClient().ContainerLogs(ctx, container, containerType.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,

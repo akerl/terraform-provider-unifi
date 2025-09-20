@@ -1,12 +1,12 @@
-package unifi //
+package unifi
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -42,6 +42,16 @@ type APIError struct {
 
 func (err *APIError) Error() string {
 	return err.Message
+}
+
+func (err *APIError) Is(target error) bool {
+	var apiError *APIError
+	if errors.As(target, &apiError) {
+		if err.RC == apiError.RC && err.Message == apiError.Message {
+			return true
+		}
+	}
+	return false
 }
 
 type Client struct {
@@ -114,7 +124,7 @@ func (c *Client) setAPIUrlStyle(ctx context.Context) error {
 		return err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(ioutil.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode == http.StatusOK {
 		// the new API returns a 200 for a / request
@@ -184,7 +194,7 @@ func (c *Client) Login(ctx context.Context, user, pass string) error {
 	c.version = si.Version
 
 	if c.version == "" {
-		return fmt.Errorf("unable to determine controller version")
+		return errors.New("unable to determine controller version")
 	}
 
 	return nil
@@ -226,7 +236,7 @@ func (c *Client) do(ctx context.Context, method, relativeURL string, reqBody int
 	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 
 	if c.csrf != "" {
-		req.Header.Set("X-CSRF-Token", c.csrf)
+		req.Header.Set("X-Csrf-Token", c.csrf)
 	}
 
 	resp, err := c.c.Do(req)
@@ -239,8 +249,8 @@ func (c *Client) do(ctx context.Context, method, relativeURL string, reqBody int
 		return &NotFoundError{}
 	}
 
-	if csrf := resp.Header.Get("x-csrf-token"); csrf != "" {
-		c.csrf = resp.Header.Get("x-csrf-token")
+	if csrf := resp.Header.Get("X-Csrf-Token"); csrf != "" {
+		c.csrf = resp.Header.Get("X-Csrf-Token")
 	}
 
 	if resp.StatusCode != http.StatusOK {

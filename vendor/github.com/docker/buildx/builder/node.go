@@ -2,9 +2,12 @@ package builder
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
+	"strings"
 
+	"github.com/containerd/platforms"
 	"github.com/docker/buildx/driver"
-	ctxkube "github.com/docker/buildx/driver/kubernetes/context"
 	"github.com/docker/buildx/store"
 	"github.com/docker/buildx/store/storeutil"
 	"github.com/docker/buildx/util/dockerutil"
@@ -14,7 +17,6 @@ import (
 	"github.com/moby/buildkit/util/grpcerrors"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 )
@@ -24,13 +26,17 @@ type Node struct {
 	Builder     string
 	Driver      *driver.DriverHandle
 	DriverInfo  *driver.Info
-	Platforms   []ocispecs.Platform
-	GCPolicy    []client.PruneInfo
-	Labels      map[string]string
 	ImageOpt    imagetools.Opt
 	ProxyConfig map[string]string
 	Version     string
 	Err         error
+
+	// worker settings
+	IDs        []string
+	Platforms  []ocispecs.Platform
+	GCPolicy   []client.PruneInfo
+	Labels     map[string]string
+	CDIDevices []client.CDIDevice
 }
 
 // Nodes returns nodes for this builder.
@@ -38,9 +44,42 @@ func (b *Builder) Nodes() []Node {
 	return b.nodes
 }
 
+type LoadNodesOption func(*loadNodesOptions)
+
+type loadNodesOptions struct {
+	data      bool
+	dialMeta  map[string][]string
+	clientOpt []client.ClientOpt
+}
+
+func WithData() LoadNodesOption {
+	return func(o *loadNodesOptions) {
+		o.data = true
+	}
+}
+
+func WithDialMeta(dialMeta map[string][]string) LoadNodesOption {
+	return func(o *loadNodesOptions) {
+		o.dialMeta = dialMeta
+	}
+}
+
+func WithClientOpt(clientOpt ...client.ClientOpt) LoadNodesOption {
+	return func(o *loadNodesOptions) {
+		o.clientOpt = clientOpt
+	}
+}
+
 // LoadNodes loads and returns nodes for this builder.
 // TODO: this should be a method on a Node object and lazy load data for each driver.
-func (b *Builder) LoadNodes(ctx context.Context, withData bool) (_ []Node, err error) {
+func (b *Builder) LoadNodes(ctx context.Context, opts ...LoadNodesOption) (_ []Node, err error) {
+	lno := loadNodesOptions{
+		data: false,
+	}
+	for _, opt := range opts {
+		opt(&lno)
+	}
+
 	eg, _ := errgroup.WithContext(ctx)
 	b.nodes = make([]Node, len(b.NodeGroup.Nodes))
 
@@ -50,7 +89,7 @@ func (b *Builder) LoadNodes(ctx context.Context, withData bool) (_ []Node, err e
 		}
 	}()
 
-	factory, err := b.Factory(ctx)
+	factory, err := b.Factory(ctx, lno.dialMeta)
 	if err != nil {
 		return nil, err
 	}
@@ -79,37 +118,19 @@ func (b *Builder) LoadNodes(ctx context.Context, withData bool) (_ []Node, err e
 					return nil
 				}
 
-				contextStore := b.opts.dockerCli.ContextStore()
-
-				var kcc driver.KubeClientConfig
-				kcc, err = ctxkube.ConfigFromEndpoint(n.Endpoint, contextStore)
-				if err != nil {
-					// err is returned if n.Endpoint is non-context name like "unix:///var/run/docker.sock".
-					// try again with name="default".
-					// FIXME(@AkihiroSuda): n should retain real context name.
-					kcc, err = ctxkube.ConfigFromEndpoint("default", contextStore)
-					if err != nil {
-						logrus.Error(err)
-					}
-				}
-
-				tryToUseKubeConfigInCluster := false
-				if kcc == nil {
-					tryToUseKubeConfigInCluster = true
-				} else {
-					if _, err := kcc.ClientConfig(); err != nil {
-						tryToUseKubeConfigInCluster = true
-					}
-				}
-				if tryToUseKubeConfigInCluster {
-					kccInCluster := driver.KubeClientConfigInCluster{}
-					if _, err := kccInCluster.ClientConfig(); err == nil {
-						logrus.Debug("using kube config in cluster")
-						kcc = kccInCluster
-					}
-				}
-
-				d, err := driver.GetDriver(ctx, "buildx_buildkit_"+n.Name, factory, n.Endpoint, dockerapi, imageopt.Auth, kcc, n.Flags, n.Files, n.DriverOpts, n.Platforms, b.opts.contextPathHash)
+				d, err := driver.GetDriver(ctx, factory, driver.InitConfig{
+					Name:            driver.BuilderName(n.Name),
+					EndpointAddr:    n.Endpoint,
+					DockerAPI:       dockerapi,
+					ContextStore:    b.opts.dockerCli.ContextStore(),
+					BuildkitdFlags:  n.BuildkitdFlags,
+					Files:           n.Files,
+					DriverOpts:      n.DriverOpts,
+					Auth:            imageopt.Auth,
+					Platforms:       n.Platforms,
+					ContextPathHash: b.opts.contextPathHash,
+					DialMeta:        lno.dialMeta,
+				})
 				if err != nil {
 					node.Err = err
 					return nil
@@ -117,8 +138,8 @@ func (b *Builder) LoadNodes(ctx context.Context, withData bool) (_ []Node, err e
 				node.Driver = d
 				node.ImageOpt = imageopt
 
-				if withData {
-					if err := node.loadData(ctx); err != nil {
+				if lno.data {
+					if err := node.loadData(ctx, lno.clientOpt...); err != nil {
 						node.Err = err
 					}
 				}
@@ -132,7 +153,7 @@ func (b *Builder) LoadNodes(ctx context.Context, withData bool) (_ []Node, err e
 	}
 
 	// TODO: This should be done in the routine loading driver data
-	if withData {
+	if lno.data {
 		kubernetesDriverCount := 0
 		for _, d := range b.nodes {
 			if d.DriverInfo != nil && len(d.DriverInfo.DynamicNodes) > 0 {
@@ -148,12 +169,12 @@ func (b *Builder) LoadNodes(ctx context.Context, withData bool) (_ []Node, err e
 				// dynamic nodes are used in Kubernetes driver.
 				// Kubernetes' pods are dynamically mapped to BuildKit Nodes.
 				if di.DriverInfo != nil && len(di.DriverInfo.DynamicNodes) > 0 {
-					for i := 0; i < len(di.DriverInfo.DynamicNodes); i++ {
+					for i := range di.DriverInfo.DynamicNodes {
 						diClone := di
 						if pl := di.DriverInfo.DynamicNodes[i].Platforms; len(pl) > 0 {
 							diClone.Platforms = pl
 						}
-						nodes = append(nodes, di)
+						nodes = append(nodes, diClone)
 					}
 					dynamicNodes = append(dynamicNodes, di.DriverInfo.DynamicNodes...)
 				}
@@ -169,7 +190,52 @@ func (b *Builder) LoadNodes(ctx context.Context, withData bool) (_ []Node, err e
 	return b.nodes, nil
 }
 
-func (n *Node) loadData(ctx context.Context) error {
+func (n *Node) MarshalJSON() ([]byte, error) {
+	var status string
+	if n.DriverInfo != nil {
+		status = n.DriverInfo.Status.String()
+	}
+	var nerr string
+	if n.Err != nil {
+		status = "error"
+		nerr = strings.TrimSpace(n.Err.Error())
+	}
+	var pp []string
+	for _, p := range n.Platforms {
+		pp = append(pp, platforms.Format(p))
+	}
+	return json.Marshal(struct {
+		Name           string
+		Endpoint       string
+		BuildkitdFlags []string           `json:"Flags,omitempty"`
+		DriverOpts     map[string]string  `json:",omitempty"`
+		Files          map[string][]byte  `json:",omitempty"`
+		Status         string             `json:",omitempty"`
+		ProxyConfig    map[string]string  `json:",omitempty"`
+		Version        string             `json:",omitempty"`
+		Err            string             `json:",omitempty"`
+		IDs            []string           `json:",omitempty"`
+		Platforms      []string           `json:",omitempty"`
+		GCPolicy       []client.PruneInfo `json:",omitempty"`
+		Labels         map[string]string  `json:",omitempty"`
+	}{
+		Name:           n.Name,
+		Endpoint:       n.Endpoint,
+		BuildkitdFlags: n.BuildkitdFlags,
+		DriverOpts:     n.DriverOpts,
+		Files:          n.Files,
+		Status:         status,
+		ProxyConfig:    n.ProxyConfig,
+		Version:        n.Version,
+		Err:            nerr,
+		IDs:            n.IDs,
+		Platforms:      pp,
+		GCPolicy:       n.GCPolicy,
+		Labels:         n.Labels,
+	})
+}
+
+func (n *Node) loadData(ctx context.Context, clientOpt ...client.ClientOpt) error {
 	if n.Driver == nil {
 		return nil
 	}
@@ -179,7 +245,7 @@ func (n *Node) loadData(ctx context.Context) error {
 	}
 	n.DriverInfo = info
 	if n.DriverInfo.Status == driver.Running {
-		driverClient, err := n.Driver.Client(ctx)
+		driverClient, err := n.Driver.Client(ctx, clientOpt...)
 		if err != nil {
 			return err
 		}
@@ -188,12 +254,15 @@ func (n *Node) loadData(ctx context.Context) error {
 			return errors.Wrap(err, "listing workers")
 		}
 		for idx, w := range workers {
+			n.IDs = append(n.IDs, w.ID)
 			n.Platforms = append(n.Platforms, w.Platforms...)
 			if idx == 0 {
 				n.GCPolicy = w.GCPolicy
 				n.Labels = w.Labels
 			}
+			n.CDIDevices = w.CDIDevices
 		}
+		sort.Strings(n.IDs)
 		n.Platforms = platformutil.Dedupe(n.Platforms)
 		inf, err := driverClient.Info(ctx)
 		if err != nil {

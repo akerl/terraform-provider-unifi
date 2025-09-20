@@ -2,13 +2,16 @@ package wait
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"reflect"
 	"time"
 )
 
 // Implement interface
-var _ Strategy = (*MultiStrategy)(nil)
-var _ StrategyTimeout = (*MultiStrategy)(nil)
+var (
+	_ Strategy        = (*MultiStrategy)(nil)
+	_ StrategyTimeout = (*MultiStrategy)(nil)
+)
 
 type MultiStrategy struct {
 	// all Strategies should have a startupTimeout to avoid waiting infinitely
@@ -56,10 +59,17 @@ func (ms *MultiStrategy) WaitUntilReady(ctx context.Context, target StrategyTarg
 	}
 
 	if len(ms.Strategies) == 0 {
-		return fmt.Errorf("no wait strategy supplied")
+		return errors.New("no wait strategy supplied")
 	}
 
 	for _, strategy := range ms.Strategies {
+		if strategy == nil || reflect.ValueOf(strategy).IsNil() {
+			// A module could be appending strategies after part of the container initialization,
+			// and use wait.ForAll on a not initialized strategy.
+			// In this case, we just skip the nil strategy.
+			continue
+		}
+
 		strategyCtx := ctx
 
 		// Set default Timeout when strategy implements StrategyTimeout

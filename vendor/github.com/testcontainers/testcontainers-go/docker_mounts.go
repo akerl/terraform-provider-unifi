@@ -1,16 +1,23 @@
 package testcontainers
 
-import "github.com/docker/docker/api/types/mount"
+import (
+	"errors"
+	"path/filepath"
 
-var (
-	mountTypeMapping = map[MountType]mount.Type{
-		MountTypeBind:   mount.TypeBind,
-		MountTypeVolume: mount.TypeVolume,
-		MountTypeTmpfs:  mount.TypeTmpfs,
-		MountTypePipe:   mount.TypeNamedPipe,
-	}
+	"github.com/docker/docker/api/types/mount"
+
+	"github.com/testcontainers/testcontainers-go/log"
 )
 
+var mountTypeMapping = map[MountType]mount.Type{
+	MountTypeBind:   mount.TypeBind, // Deprecated, it will be removed in a future release
+	MountTypeVolume: mount.TypeVolume,
+	MountTypeTmpfs:  mount.TypeTmpfs,
+	MountTypePipe:   mount.TypeNamedPipe,
+	MountTypeImage:  mount.TypeImage,
+}
+
+// Deprecated: use Files or HostConfigModifier in the ContainerRequest, or copy files container APIs to make containers portable across Docker environments
 // BindMounter can optionally be implemented by mount sources
 // to support advanced scenarios based on mount.BindOptions
 type BindMounter interface {
@@ -29,6 +36,13 @@ type TmpfsMounter interface {
 	GetTmpfsOptions() *mount.TmpfsOptions
 }
 
+// ImageMounter can optionally be implemented by mount sources
+// to support advanced scenarios based on mount.ImageOptions
+type ImageMounter interface {
+	ImageOptions() *mount.ImageOptions
+}
+
+// Deprecated: use Files or HostConfigModifier in the ContainerRequest, or copy files container APIs to make containers portable across Docker environments
 type DockerBindMountSource struct {
 	*mount.BindOptions
 
@@ -37,14 +51,17 @@ type DockerBindMountSource struct {
 	HostPath string
 }
 
+// Deprecated: use Files or HostConfigModifier in the ContainerRequest, or copy files container APIs to make containers portable across Docker environments
 func (s DockerBindMountSource) Source() string {
 	return s.HostPath
 }
 
+// Deprecated: use Files or HostConfigModifier in the ContainerRequest, or copy files container APIs to make containers portable across Docker environments
 func (DockerBindMountSource) Type() MountType {
 	return MountTypeBind
 }
 
+// Deprecated: use Files or HostConfigModifier in the ContainerRequest, or copy files container APIs to make containers portable across Docker environments
 func (s DockerBindMountSource) GetBindOptions() *mount.BindOptions {
 	return s.BindOptions
 }
@@ -78,6 +95,54 @@ func (s DockerTmpfsMountSource) GetTmpfsOptions() *mount.TmpfsOptions {
 	return s.TmpfsOptions
 }
 
+// DockerImageMountSource is a mount source for an image
+type DockerImageMountSource struct {
+	// imageName is the image name
+	imageName string
+
+	// subpath is the subpath to mount the image into
+	subpath string
+}
+
+// NewDockerImageMountSource creates a new DockerImageMountSource
+func NewDockerImageMountSource(imageName string, subpath string) DockerImageMountSource {
+	return DockerImageMountSource{
+		imageName: imageName,
+		subpath:   subpath,
+	}
+}
+
+// Validate validates the source of the mount, ensuring that the subpath is a relative path
+func (s DockerImageMountSource) Validate() error {
+	if !filepath.IsLocal(s.subpath) {
+		return errors.New("image mount source must be a local path")
+	}
+	return nil
+}
+
+// ImageOptions returns the image options for the image mount
+func (s DockerImageMountSource) ImageOptions() *mount.ImageOptions {
+	return &mount.ImageOptions{
+		Subpath: s.subpath,
+	}
+}
+
+// Source returns the image name for the image mount
+func (s DockerImageMountSource) Source() string {
+	return s.imageName
+}
+
+// Type returns the mount type for the image mount
+func (s DockerImageMountSource) Type() MountType {
+	return MountTypeImage
+}
+
+// PrepareMounts maps the given []ContainerMount to the corresponding
+// []mount.Mount for further processing
+func (m ContainerMounts) PrepareMounts() []mount.Mount {
+	return mapToDockerMounts(m)
+}
+
 // mapToDockerMounts maps the given []ContainerMount to the corresponding
 // []mount.Mount for further processing
 func mapToDockerMounts(containerMounts ContainerMounts) []mount.Mount {
@@ -101,12 +166,25 @@ func mapToDockerMounts(containerMounts ContainerMounts) []mount.Mount {
 		}
 
 		switch typedMounter := m.Source.(type) {
-		case BindMounter:
-			containerMount.BindOptions = typedMounter.GetBindOptions()
 		case VolumeMounter:
 			containerMount.VolumeOptions = typedMounter.GetVolumeOptions()
 		case TmpfsMounter:
 			containerMount.TmpfsOptions = typedMounter.GetTmpfsOptions()
+		case ImageMounter:
+			containerMount.ImageOptions = typedMounter.ImageOptions()
+		case BindMounter:
+			log.Printf("Mount type %s is not supported by Testcontainers for Go", m.Source.Type())
+		default:
+			// The provided source type has no custom options
+		}
+
+		if mountType == mount.TypeVolume {
+			if containerMount.VolumeOptions == nil {
+				containerMount.VolumeOptions = &mount.VolumeOptions{
+					Labels: make(map[string]string),
+				}
+			}
+			AddGenericLabels(containerMount.VolumeOptions.Labels)
 		}
 
 		mounts = append(mounts, containerMount)

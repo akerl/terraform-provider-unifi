@@ -47,7 +47,7 @@ func NewUpdateCommand(dockerCli command.Cli) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.containers = args
 			options.nFlag = cmd.Flags().NFlag()
-			return runUpdate(dockerCli, &options)
+			return runUpdate(cmd.Context(), dockerCli, &options)
 		},
 		Annotations: map[string]string{
 			"aliases": "docker container update, docker update",
@@ -83,10 +83,12 @@ func NewUpdateCommand(dockerCli command.Cli) *cobra.Command {
 	flags.Var(&options.cpus, "cpus", "Number of CPUs")
 	flags.SetAnnotation("cpus", "version", []string{"1.29"})
 
+	_ = cmd.RegisterFlagCompletionFunc("restart", completeRestartPolicies)
+
 	return cmd
 }
 
-func runUpdate(dockerCli command.Cli, options *updateOptions) error {
+func runUpdate(ctx context.Context, dockerCli command.Cli, options *updateOptions) error {
 	var err error
 
 	if options.nFlag == 0 {
@@ -126,23 +128,21 @@ func runUpdate(dockerCli command.Cli, options *updateOptions) error {
 		RestartPolicy: restartPolicy,
 	}
 
-	ctx := context.Background()
-
 	var (
 		warns []string
 		errs  []string
 	)
-	for _, container := range options.containers {
-		r, err := dockerCli.Client().ContainerUpdate(ctx, container, updateConfig)
+	for _, ctr := range options.containers {
+		r, err := dockerCli.Client().ContainerUpdate(ctx, ctr, updateConfig)
 		if err != nil {
 			errs = append(errs, err.Error())
 		} else {
-			fmt.Fprintln(dockerCli.Out(), container)
+			_, _ = fmt.Fprintln(dockerCli.Out(), ctr)
 		}
 		warns = append(warns, r.Warnings...)
 	}
 	if len(warns) > 0 {
-		fmt.Fprintln(dockerCli.Out(), strings.Join(warns, "\n"))
+		_, _ = fmt.Fprintln(dockerCli.Out(), strings.Join(warns, "\n"))
 	}
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "\n"))

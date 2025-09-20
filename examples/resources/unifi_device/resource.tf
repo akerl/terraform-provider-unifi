@@ -33,8 +33,8 @@ resource "unifi_device" "us_24_poe" {
 
   # port aggregation for ports 11 and 12
   port_override {
-    number              = 11
-    op_mode             = "aggregate"
-    aggregate_num_ports = 2
+    number            = 11
+    op_mode           = "aggregate"
+    aggregate_members = 2
   }
 }

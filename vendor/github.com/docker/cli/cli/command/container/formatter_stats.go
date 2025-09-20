@@ -22,9 +22,11 @@ const (
 	winMemUseHeader = "PRIV WORKING SET"  // Used only on Windows
 	memUseHeader    = "MEM USAGE / LIMIT" // Used only on Linux
 	pidsHeader      = "PIDS"              // Used only on Linux
+
+	noValue = "--"
 )
 
-// StatsEntry represents represents the statistics data collected from a container
+// StatsEntry represents the statistics data collected from a container
 type StatsEntry struct {
 	Container        string
 	Name             string
@@ -116,9 +118,9 @@ func NewStats(container string) *Stats {
 }
 
 // statsFormatWrite renders the context for a list of containers statistics
-func statsFormatWrite(ctx formatter.Context, Stats []StatsEntry, osType string, trunc bool) error {
+func statsFormatWrite(ctx formatter.Context, stats []StatsEntry, osType string, trunc bool) error {
 	render := func(format func(subContext formatter.SubContext) error) error {
-		for _, cstats := range Stats {
+		for _, cstats := range stats {
 			statsCtx := &statsContext{
 				s:     cstats,
 				os:    osType,
@@ -169,7 +171,7 @@ func (c *statsContext) Name() string {
 	if len(c.s.Name) > 1 {
 		return c.s.Name[1:]
 	}
-	return "--"
+	return noValue
 }
 
 func (c *statsContext) ID() string {
@@ -181,7 +183,7 @@ func (c *statsContext) ID() string {
 
 func (c *statsContext) CPUPerc() string {
 	if c.s.IsInvalid {
-		return "--"
+		return noValue
 	}
 	return formatPercentage(c.s.CPUPercentage)
 }
@@ -198,28 +200,28 @@ func (c *statsContext) MemUsage() string {
 
 func (c *statsContext) MemPerc() string {
 	if c.s.IsInvalid || c.os == winOSType {
-		return "--"
+		return noValue
 	}
 	return formatPercentage(c.s.MemoryPercentage)
 }
 
 func (c *statsContext) NetIO() string {
 	if c.s.IsInvalid {
-		return "--"
+		return noValue
 	}
 	return units.HumanSizeWithPrecision(c.s.NetworkRx, 3) + " / " + units.HumanSizeWithPrecision(c.s.NetworkTx, 3)
 }
 
 func (c *statsContext) BlockIO() string {
 	if c.s.IsInvalid {
-		return "--"
+		return noValue
 	}
 	return units.HumanSizeWithPrecision(c.s.BlockRead, 3) + " / " + units.HumanSizeWithPrecision(c.s.BlockWrite, 3)
 }
 
 func (c *statsContext) PIDs() string {
 	if c.s.IsInvalid || c.os == winOSType {
-		return "--"
+		return noValue
 	}
 	return strconv.FormatUint(c.s.PidsCurrent, 10)
 }

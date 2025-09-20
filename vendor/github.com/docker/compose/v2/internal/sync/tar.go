@@ -21,6 +21,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -30,10 +31,8 @@ import (
 	"strings"
 
 	"github.com/hashicorp/go-multierror"
-	"github.com/pkg/errors"
 
-	"github.com/compose-spec/compose-go/types"
-	moby "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/archive"
 )
 
@@ -44,9 +43,10 @@ type archiveEntry struct {
 }
 
 type LowLevelClient interface {
-	ContainersForService(ctx context.Context, projectName string, serviceName string) ([]moby.Container, error)
+	ContainersForService(ctx context.Context, projectName string, serviceName string) ([]container.Summary, error)
 
 	Exec(ctx context.Context, containerID string, cmd []string, in io.Reader) error
+	Untar(ctx context.Context, id string, reader io.ReadCloser) error
 }
 
 type Tar struct {
@@ -64,8 +64,8 @@ func NewTar(projectName string, client LowLevelClient) *Tar {
 	}
 }
 
-func (t *Tar) Sync(ctx context.Context, service types.ServiceConfig, paths []PathMapping) error {
-	containers, err := t.client.ContainersForService(ctx, t.projectName, service.Name)
+func (t *Tar) Sync(ctx context.Context, service string, paths []*PathMapping) error {
+	containers, err := t.client.ContainersForService(ctx, t.projectName, service)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (t *Tar) Sync(ctx context.Context, service types.ServiceConfig, paths []Pat
 		if _, err := os.Stat(p.HostPath); err != nil && errors.Is(err, fs.ErrNotExist) {
 			pathsToDelete = append(pathsToDelete, p.ContainerPath)
 		} else {
-			pathsToCopy = append(pathsToCopy, p)
+			pathsToCopy = append(pathsToCopy, *p)
 		}
 	}
 
@@ -84,39 +84,24 @@ func (t *Tar) Sync(ctx context.Context, service types.ServiceConfig, paths []Pat
 	if len(pathsToDelete) != 0 {
 		deleteCmd = append([]string{"rm", "-rf"}, pathsToDelete...)
 	}
-	copyCmd := []string{"tar", "-v", "-C", "/", "-x", "-f", "-"}
-
 	var eg multierror.Group
-	writers := make([]*io.PipeWriter, len(containers))
 	for i := range containers {
 		containerID := containers[i].ID
-		r, w := io.Pipe()
-		writers[i] = w
+		tarReader := tarArchive(pathsToCopy)
+
 		eg.Go(func() error {
 			if len(deleteCmd) != 0 {
 				if err := t.client.Exec(ctx, containerID, deleteCmd, nil); err != nil {
 					return fmt.Errorf("deleting paths in %s: %w", containerID, err)
 				}
 			}
-			if err := t.client.Exec(ctx, containerID, copyCmd, r); err != nil {
+
+			if err := t.client.Untar(ctx, containerID, tarReader); err != nil {
 				return fmt.Errorf("copying files to %s: %w", containerID, err)
 			}
 			return nil
 		})
 	}
-
-	multiWriter := newLossyMultiWriter(writers...)
-	tarReader := tarArchive(pathsToCopy)
-	defer func() {
-		_ = tarReader.Close()
-		multiWriter.Close()
-	}()
-	_, err = io.Copy(multiWriter, tarReader)
-	if err != nil {
-		return err
-	}
-	multiWriter.Close()
-
 	return eg.Wait().ErrorOrNil()
 }
 
@@ -212,7 +197,7 @@ func (a *ArchiveBuilder) writeEntry(entry archiveEntry) error {
 	if useBuf {
 		a.copyBuf.Reset()
 		_, err = io.Copy(a.copyBuf, file)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			return fmt.Errorf("copying %q: %w", pathInTar, err)
 		}
 		header.Size = int64(len(a.copyBuf.Bytes()))
@@ -232,7 +217,7 @@ func (a *ArchiveBuilder) writeEntry(entry archiveEntry) error {
 		_, err = io.Copy(a.tw, file)
 	}
 
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("copying %q: %w", pathInTar, err)
 	}
 

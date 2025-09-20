@@ -5,31 +5,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/docker/cli/cli/command"
+	"github.com/docker/cli/cli-plugins/metadata"
+	"github.com/docker/cli/cli/config"
 	"github.com/spf13/cobra"
-)
-
-const (
-	// CommandAnnotationPlugin is added to every stub command added by
-	// AddPluginCommandStubs with the value "true" and so can be
-	// used to distinguish plugin stubs from regular commands.
-	CommandAnnotationPlugin = "com.docker.cli.plugin"
-
-	// CommandAnnotationPluginVendor is added to every stub command
-	// added by AddPluginCommandStubs and contains the vendor of
-	// that plugin.
-	CommandAnnotationPluginVendor = "com.docker.cli.plugin.vendor"
-
-	// CommandAnnotationPluginVersion is added to every stub command
-	// added by AddPluginCommandStubs and contains the version of
-	// that plugin.
-	CommandAnnotationPluginVersion = "com.docker.cli.plugin.version"
-
-	// CommandAnnotationPluginInvalid is added to any stub command
-	// added by AddPluginCommandStubs for an invalid command (that
-	// is, one which failed it's candidate test) and contains the
-	// reason for the failure.
-	CommandAnnotationPluginInvalid = "com.docker.cli.plugin-invalid"
 )
 
 var pluginCommandStubsOnce sync.Once
@@ -37,26 +15,25 @@ var pluginCommandStubsOnce sync.Once
 // AddPluginCommandStubs adds a stub cobra.Commands for each valid and invalid
 // plugin. The command stubs will have several annotations added, see
 // `CommandAnnotationPlugin*`.
-func AddPluginCommandStubs(dockerCli command.Cli, rootCmd *cobra.Command) (err error) {
+func AddPluginCommandStubs(dockerCLI config.Provider, rootCmd *cobra.Command) (err error) {
 	pluginCommandStubsOnce.Do(func() {
 		var plugins []Plugin
-		plugins, err = ListPlugins(dockerCli, rootCmd)
+		plugins, err = ListPlugins(dockerCLI, rootCmd)
 		if err != nil {
 			return
 		}
 		for _, p := range plugins {
-			p := p
 			vendor := p.Vendor
 			if vendor == "" {
 				vendor = "unknown"
 			}
 			annotations := map[string]string{
-				CommandAnnotationPlugin:        "true",
-				CommandAnnotationPluginVendor:  vendor,
-				CommandAnnotationPluginVersion: p.Version,
+				metadata.CommandAnnotationPlugin:        "true",
+				metadata.CommandAnnotationPluginVendor:  vendor,
+				metadata.CommandAnnotationPluginVersion: p.Version,
 			}
 			if p.Err != nil {
-				annotations[CommandAnnotationPluginInvalid] = p.Err.Error()
+				annotations[metadata.CommandAnnotationPluginInvalid] = p.Err.Error()
 			}
 			rootCmd.AddCommand(&cobra.Command{
 				Use:                p.Name,
@@ -75,7 +52,7 @@ func AddPluginCommandStubs(dockerCli command.Cli, rootCmd *cobra.Command) (err e
 						cmd.HelpFunc()(rootCmd, args)
 						return nil
 					}
-					return fmt.Errorf("docker: '%s' is not a docker command.\nSee 'docker --help'", cmd.Name())
+					return fmt.Errorf("docker: unknown command: docker %s\n\nRun 'docker --help' for more information", cmd.Name())
 				},
 				ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 					// Delegate completion to plugin
@@ -83,7 +60,7 @@ func AddPluginCommandStubs(dockerCli command.Cli, rootCmd *cobra.Command) (err e
 					cargs = append(cargs, args...)
 					cargs = append(cargs, toComplete)
 					os.Args = cargs
-					runCommand, runErr := PluginRunCommand(dockerCli, p.Name, cmd)
+					runCommand, runErr := PluginRunCommand(dockerCLI, p.Name, cmd)
 					if runErr != nil {
 						return nil, cobra.ShellCompDirectiveError
 					}

@@ -19,7 +19,7 @@ package compose
 import (
 	"encoding/json"
 
-	"github.com/compose-spec/compose-go/types"
+	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/opencontainers/go-digest"
 )
 
@@ -28,12 +28,34 @@ func ServiceHash(o types.ServiceConfig) (string, error) {
 	// remove the Build config when generating the service hash
 	o.Build = nil
 	o.PullPolicy = ""
-	if o.Deploy == nil {
-		o.Deploy = &types.DeployConfig{}
+	o.Scale = nil
+	if o.Deploy != nil {
+		o.Deploy.Replicas = nil
 	}
-	o.Scale = 1
-	var one uint64 = 1
-	o.Deploy.Replicas = &one
+	o.DependsOn = nil
+	o.Profiles = nil
+
+	bytes, err := json.Marshal(o)
+	if err != nil {
+		return "", err
+	}
+	return digest.SHA256.FromBytes(bytes).Encoded(), nil
+}
+
+// NetworkHash computes the configuration hash for a network.
+func NetworkHash(o *types.NetworkConfig) (string, error) {
+	bytes, err := json.Marshal(o)
+	if err != nil {
+		return "", err
+	}
+	return digest.SHA256.FromBytes(bytes).Encoded(), nil
+}
+
+// VolumeHash computes the configuration hash for a volume.
+func VolumeHash(o types.VolumeConfig) (string, error) {
+	if o.Driver == "" { // (TODO: jhrotko) This probably should be fixed in compose-go
+		o.Driver = "local"
+	}
 	bytes, err := json.Marshal(o)
 	if err != nil {
 		return "", err

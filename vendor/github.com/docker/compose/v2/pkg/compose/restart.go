@@ -20,11 +20,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/compose-spec/compose-go/types"
+	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/compose/v2/pkg/api"
 	"github.com/docker/compose/v2/pkg/progress"
 	"github.com/docker/compose/v2/pkg/utils"
-	containerType "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/container"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -48,18 +48,28 @@ func (s *composeService) restart(ctx context.Context, projectName string, option
 		}
 	}
 
+	if options.NoDeps {
+		project, err = project.WithSelectedServices(options.Services, types.IgnoreDependencies)
+		if err != nil {
+			return err
+		}
+	}
+
 	// ignore depends_on relations which are not impacted by restarting service or not required
-	for i, service := range project.Services {
-		for name, r := range service.DependsOn {
+	project, err = project.WithServicesTransform(func(_ string, s types.ServiceConfig) (types.ServiceConfig, error) {
+		for name, r := range s.DependsOn {
 			if !r.Restart {
-				delete(service.DependsOn, name)
+				delete(s.DependsOn, name)
 			}
 		}
-		project.Services[i] = service
+		return s, nil
+	})
+	if err != nil {
+		return err
 	}
 
 	if len(options.Services) != 0 {
-		err = project.ForServices(options.Services, types.IncludeDependents)
+		project, err = project.WithSelectedServices(options.Services, types.IncludeDependents)
 		if err != nil {
 			return err
 		}
@@ -67,18 +77,24 @@ func (s *composeService) restart(ctx context.Context, projectName string, option
 
 	w := progress.ContextWriter(ctx)
 	return InDependencyOrder(ctx, project, func(c context.Context, service string) error {
+		config := project.Services[service]
+		err = s.waitDependencies(ctx, project, service, config.DependsOn, containers, 0)
+		if err != nil {
+			return err
+		}
+
 		eg, ctx := errgroup.WithContext(ctx)
-		for _, container := range containers.filter(isService(service)) {
-			container := container
+		for _, ctr := range containers.filter(isService(service)) {
 			eg.Go(func() error {
-				eventName := getContainerProgressName(container)
+				eventName := getContainerProgressName(ctr)
 				w.Event(progress.RestartingEvent(eventName))
 				timeout := utils.DurationSecondToInt(options.Timeout)
-				err := s.apiClient().ContainerRestart(ctx, container.ID, containerType.StopOptions{Timeout: timeout})
-				if err == nil {
-					w.Event(progress.StartedEvent(eventName))
+				err = s.apiClient().ContainerRestart(ctx, ctr.ID, container.StopOptions{Timeout: timeout})
+				if err != nil {
+					return err
 				}
-				return err
+				w.Event(progress.StartedEvent(eventName))
+				return nil
 			})
 		}
 		return eg.Wait()

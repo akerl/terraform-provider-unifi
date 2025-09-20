@@ -22,9 +22,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/compose-spec/compose-go/types"
+	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/compose/v2/pkg/api"
-	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/docker/compose/v2/pkg/utils"
@@ -173,7 +172,6 @@ func (t *graphTraversal) run(ctx context.Context, graph *Graph, eg *errgroup.Gro
 			continue
 		}
 
-		node := node
 		if !t.consume(node.Key) {
 			// another worker already visited this node
 			continue
@@ -225,7 +223,7 @@ func getParents(v *Vertex) []*Vertex {
 	return v.GetParents()
 }
 
-// GetParents returns a slice with the parent vertices of the a Vertex
+// GetParents returns a slice with the parent vertices of the Vertex
 func (v *Vertex) GetParents() []*Vertex {
 	var res []*Vertex
 	for _, p := range v.Parents {
@@ -248,7 +246,7 @@ func getAncestors(v *Vertex) []*Vertex {
 	return descendents
 }
 
-// GetChildren returns a slice with the child vertices of the a Vertex
+// GetChildren returns a slice with the child vertices of the Vertex
 func (v *Vertex) GetChildren() []*Vertex {
 	var res []*Vertex
 	for _, p := range v.Children {
@@ -324,10 +322,10 @@ func (g *Graph) AddEdge(source string, destination string) error {
 	destinationVertex := g.Vertices[destination]
 
 	if sourceVertex == nil {
-		return errors.Wrapf(api.ErrNotFound, "could not find %s", source)
+		return fmt.Errorf("could not find %s: %w", source, api.ErrNotFound)
 	}
 	if destinationVertex == nil {
-		return errors.Wrapf(api.ErrNotFound, "could not find %s", destination)
+		return fmt.Errorf("could not find %s: %w", destination, api.ErrNotFound)
 	}
 
 	// If they are already connected
@@ -439,7 +437,6 @@ func (g *Graph) HasCycles() (bool, error) {
 		if !utils.StringContains(discovered, vertex.Key) && !utils.StringContains(finished, vertex.Key) {
 			var err error
 			discovered, finished, err = g.visit(vertex.Key, path, discovered, finished)
-
 			if err != nil {
 				return true, err
 			}

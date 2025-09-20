@@ -1,7 +1,11 @@
+// FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
+//go:build go1.22
+
 package command
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,9 +13,12 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/streams"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/errdefs"
 	"github.com/moby/sys/sequential"
+	"github.com/moby/term"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 )
@@ -43,36 +50,61 @@ func CopyToFile(outfile string, r io.Reader) error {
 	return nil
 }
 
-// capitalizeFirst capitalizes the first character of string
-func capitalizeFirst(s string) string {
-	switch l := len(s); l {
-	case 0:
-		return s
-	case 1:
-		return strings.ToLower(s)
-	default:
-		return strings.ToUpper(string(s[0])) + strings.ToLower(s[1:])
+var ErrPromptTerminated = errdefs.Cancelled(errors.New("prompt terminated"))
+
+// DisableInputEcho disables input echo on the provided streams.In.
+// This is useful when the user provides sensitive information like passwords.
+// The function returns a restore function that should be called to restore the
+// terminal state.
+func DisableInputEcho(ins *streams.In) (restore func() error, err error) {
+	oldState, err := term.SaveState(ins.FD())
+	if err != nil {
+		return nil, err
+	}
+	restore = func() error {
+		return term.RestoreTerminal(ins.FD(), oldState)
+	}
+	return restore, term.DisableEcho(ins.FD(), oldState)
+}
+
+// PromptForInput requests input from the user.
+//
+// If the user terminates the CLI with SIGINT or SIGTERM while the prompt is
+// active, the prompt will return an empty string ("") with an ErrPromptTerminated error.
+// When the prompt returns an error, the caller should propagate the error up
+// the stack and close the io.Reader used for the prompt which will prevent the
+// background goroutine from blocking indefinitely.
+func PromptForInput(ctx context.Context, in io.Reader, out io.Writer, message string) (string, error) {
+	_, _ = fmt.Fprint(out, message)
+
+	result := make(chan string)
+	go func() {
+		scanner := bufio.NewScanner(in)
+		if scanner.Scan() {
+			result <- strings.TrimSpace(scanner.Text())
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		_, _ = fmt.Fprintln(out, "")
+		return "", ErrPromptTerminated
+	case r := <-result:
+		return r, nil
 	}
 }
 
-// PrettyPrint outputs arbitrary data for human formatted output by uppercasing the first letter.
-func PrettyPrint(i interface{}) string {
-	switch t := i.(type) {
-	case nil:
-		return "None"
-	case string:
-		return capitalizeFirst(t)
-	default:
-		return capitalizeFirst(fmt.Sprintf("%s", t))
-	}
-}
-
-// PromptForConfirmation requests and checks confirmation from user.
-// This will display the provided message followed by ' [y/N] '. If
-// the user input 'y' or 'Y' it returns true other false.  If no
-// message is provided "Are you sure you want to proceed? [y/N] "
-// will be used instead.
-func PromptForConfirmation(ins io.Reader, outs io.Writer, message string) bool {
+// PromptForConfirmation requests and checks confirmation from the user.
+// This will display the provided message followed by ' [y/N] '. If the user
+// input 'y' or 'Y' it returns true otherwise false. If no message is provided,
+// "Are you sure you want to proceed? [y/N] " will be used instead.
+//
+// If the user terminates the CLI with SIGINT or SIGTERM while the prompt is
+// active, the prompt will return false with an ErrPromptTerminated error.
+// When the prompt returns an error, the caller should propagate the error up
+// the stack and close the io.Reader used for the prompt which will prevent the
+// background goroutine from blocking indefinitely.
+func PromptForConfirmation(ctx context.Context, ins io.Reader, outs io.Writer, message string) (bool, error) {
 	if message == "" {
 		message = "Are you sure you want to proceed?"
 	}
@@ -85,17 +117,36 @@ func PromptForConfirmation(ins io.Reader, outs io.Writer, message string) bool {
 		ins = streams.NewIn(os.Stdin)
 	}
 
-	reader := bufio.NewReader(ins)
-	answer, _, _ := reader.ReadLine()
-	return strings.ToLower(string(answer)) == "y"
+	result := make(chan bool)
+
+	go func() {
+		var res bool
+		scanner := bufio.NewScanner(ins)
+		if scanner.Scan() {
+			answer := strings.TrimSpace(scanner.Text())
+			if strings.EqualFold(answer, "y") {
+				res = true
+			}
+		}
+		result <- res
+	}()
+
+	select {
+	case <-ctx.Done():
+		_, _ = fmt.Fprintln(outs, "")
+		return false, ErrPromptTerminated
+	case r := <-result:
+		return r, nil
+	}
 }
 
 // PruneFilters returns consolidated prune filters obtained from config.json and cli
-func PruneFilters(dockerCli Cli, pruneFilters filters.Args) filters.Args {
-	if dockerCli.ConfigFile() == nil {
+func PruneFilters(dockerCLI config.Provider, pruneFilters filters.Args) filters.Args {
+	cfg := dockerCLI.ConfigFile()
+	if cfg == nil {
 		return pruneFilters
 	}
-	for _, f := range dockerCli.ConfigFile().PruneFilters {
+	for _, f := range cfg.PruneFilters {
 		k, v, ok := strings.Cut(f, "=")
 		if !ok {
 			continue
@@ -124,7 +175,7 @@ func PruneFilters(dockerCli Cli, pruneFilters filters.Args) filters.Args {
 // AddPlatformFlag adds `platform` to a set of flags for API version 1.32 and later.
 func AddPlatformFlag(flags *pflag.FlagSet, target *string) {
 	flags.StringVar(target, "platform", os.Getenv("DOCKER_DEFAULT_PLATFORM"), "Set platform if server is multi-platform capable")
-	flags.SetAnnotation("platform", "version", []string{"1.32"})
+	_ = flags.SetAnnotation("platform", "version", []string{"1.32"})
 }
 
 // ValidateOutputPath validates the output paths of the `export` and `save` commands.
@@ -147,7 +198,7 @@ func ValidateOutputPath(path string) error {
 		}
 
 		if err := ValidateOutputPathFileMode(fileInfo.Mode()); err != nil {
-			return errors.Wrapf(err, fmt.Sprintf("invalid output path: %q must be a directory or a regular file", path))
+			return errors.Wrapf(err, "invalid output path: %q must be a directory or a regular file", path)
 		}
 	}
 	return nil
@@ -163,35 +214,4 @@ func ValidateOutputPathFileMode(fileMode os.FileMode) error {
 		return errors.New("got an irregular file")
 	}
 	return nil
-}
-
-func stringSliceIndex(s, subs []string) int {
-	j := 0
-	if len(subs) > 0 {
-		for i, x := range s {
-			if j < len(subs) && subs[j] == x {
-				j++
-			} else {
-				j = 0
-			}
-			if len(subs) == j {
-				return i + 1 - j
-			}
-		}
-	}
-	return -1
-}
-
-// StringSliceReplaceAt replaces the sub-slice old, with the sub-slice new, in the string
-// slice s, returning a new slice and a boolean indicating if the replacement happened.
-// requireIdx is the index at which old needs to be found at (or -1 to disregard that).
-func StringSliceReplaceAt(s, old, new []string, requireIndex int) ([]string, bool) {
-	idx := stringSliceIndex(s, old)
-	if (requireIndex != -1 && requireIndex != idx) || idx == -1 {
-		return s, false
-	}
-	out := append([]string{}, s[:idx]...)
-	out = append(out, new...)
-	out = append(out, s[idx+len(old):]...)
-	return out, true
 }

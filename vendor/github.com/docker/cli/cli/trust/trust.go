@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/distribution/reference"
 	"github.com/docker/cli/cli/config"
-	"github.com/docker/distribution/reference"
 	"github.com/docker/distribution/registry/client/auth"
 	"github.com/docker/distribution/registry/client/auth/challenge"
 	"github.com/docker/distribution/registry/client/transport"
@@ -40,9 +40,10 @@ var (
 	ActionsPullOnly = []string{"pull"}
 	// ActionsPushAndPull defines the actions for read-write interactions with a Notary Repository
 	ActionsPushAndPull = []string{"pull", "push"}
-	// NotaryServer is the endpoint serving the Notary trust server
-	NotaryServer = "https://notary.docker.io"
 )
+
+// NotaryServer is the endpoint serving the Notary trust server
+const NotaryServer = "https://notary.docker.io"
 
 // GetTrustDirectory returns the base trust directory name
 func GetTrustDirectory() string {
@@ -89,7 +90,7 @@ func (scs simpleCredentialStore) RefreshToken(*url.URL, string) string {
 	return scs.auth.IdentityToken
 }
 
-func (scs simpleCredentialStore) SetRefreshToken(*url.URL, string, string) {}
+func (simpleCredentialStore) SetRefreshToken(*url.URL, string, string) {}
 
 // GetNotaryRepository returns a NotaryRepository which stores all the
 // information needed to operate on a notary repository.
@@ -119,7 +120,6 @@ func GetNotaryRepository(in io.Reader, out io.Writer, userAgent string, repoInfo
 		Dial: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
-			DualStack: true,
 		}).Dial,
 		TLSHandshakeTimeout: 10 * time.Second,
 		TLSClientConfig:     cfg,
@@ -158,7 +158,6 @@ func GetNotaryRepository(in io.Reader, out io.Writer, userAgent string, repoInfo
 	scope := auth.RepositoryScope{
 		Repository: repoInfo.Name.Name(),
 		Actions:    actions,
-		Class:      repoInfo.Class, // TODO(thaJeztah): Class is no longer needed for plugins and can likely be removed; see https://github.com/docker/cli/pull/4114#discussion_r1145430825
 	}
 	creds := simpleCredentialStore{auth: *authConfig}
 	tokenHandlerOptions := auth.TokenHandlerOptions{
@@ -240,6 +239,20 @@ func NotaryError(repoName string, err error) error {
 	return err
 }
 
+// AddToAllSignableRoles attempts to add the image target to all the top level
+// delegation roles we can (based on whether we have the signing key and whether
+// the role's path allows us to).
+//
+// If there are no delegation roles, we add to the targets role.
+func AddToAllSignableRoles(repo client.Repository, target *client.Target) error {
+	signableRoles, err := GetSignableRoles(repo, target)
+	if err != nil {
+		return err
+	}
+
+	return repo.AddTarget(target, signableRoles...)
+}
+
 // GetSignableRoles returns a list of roles for which we have valid signing
 // keys, given a notary repository and a target
 func GetSignableRoles(repo client.Repository, target *client.Target) ([]data.RoleName, error) {
@@ -262,8 +275,8 @@ func GetSignableRoles(repo client.Repository, target *client.Target) ([]data.Rol
 		return signableRoles, nil
 	}
 
-	// there are delegation roles, find every delegation role we have a key for, and
-	// attempt to sign into into all those roles.
+	// there are delegation roles, find every delegation role we have a key for,
+	// and attempt to sign in to all those roles.
 	for _, delegationRole := range allDelegationRoles {
 		// We do not support signing any delegation role that isn't a direct child of the targets role.
 		// Also don't bother checking the keys if we can't add the target
@@ -309,11 +322,7 @@ func GetImageReferencesAndAuth(ctx context.Context,
 	}
 
 	// Resolve the Repository name from fqn to RepositoryInfo
-	repoInfo, err := registry.ParseRepositoryInfo(ref)
-	if err != nil {
-		return ImageRefAndAuth{}, err
-	}
-
+	repoInfo, _ := registry.ParseRepositoryInfo(ref)
 	authConfig := authResolver(ctx, repoInfo.Index)
 	return ImageRefAndAuth{
 		original:   imgName,

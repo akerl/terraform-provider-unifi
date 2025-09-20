@@ -1,22 +1,25 @@
+// FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
+//go:build go1.22
+
 package inspect
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
-	"strings"
 	"text/template"
 
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/templates"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
 // Inspector defines an interface to implement to process elements
 type Inspector interface {
 	// Inspect writes the raw element in JSON format.
-	Inspect(typedElement interface{}, rawElement []byte) error
+	Inspect(typedElement any, rawElement []byte) error
 	// Flush writes the result of inspecting all elements into the output stream.
 	Flush() error
 }
@@ -50,14 +53,14 @@ func NewTemplateInspectorFromString(out io.Writer, tmplStr string) (Inspector, e
 
 	tmpl, err := templates.Parse(tmplStr)
 	if err != nil {
-		return nil, errors.Errorf("template parsing error: %s", err)
+		return nil, fmt.Errorf("template parsing error: %w", err)
 	}
 	return NewTemplateInspector(out, tmpl), nil
 }
 
 // GetRefFunc is a function which used by Inspect to fetch an object from a
 // reference
-type GetRefFunc func(ref string) (interface{}, []byte, error)
+type GetRefFunc func(ref string) (any, []byte, error)
 
 // Inspect fetches objects by reference using GetRefFunc and writes the json
 // representation to the output writer.
@@ -67,27 +70,27 @@ func Inspect(out io.Writer, references []string, tmplStr string, getRef GetRefFu
 		return cli.StatusError{StatusCode: 64, Status: err.Error()}
 	}
 
-	var inspectErrs []string
+	var errs []error
 	for _, ref := range references {
 		element, raw, err := getRef(ref)
 		if err != nil {
-			inspectErrs = append(inspectErrs, err.Error())
+			errs = append(errs, err)
 			continue
 		}
 
 		if err := inspector.Inspect(element, raw); err != nil {
-			inspectErrs = append(inspectErrs, err.Error())
+			errs = append(errs, err)
 		}
 	}
 
 	if err := inspector.Flush(); err != nil {
-		logrus.Errorf("%s\n", err)
+		logrus.Error(err)
 	}
 
-	if len(inspectErrs) != 0 {
+	if err := errors.Join(errs...); err != nil {
 		return cli.StatusError{
 			StatusCode: 1,
-			Status:     strings.Join(inspectErrs, "\n"),
+			Status:     err.Error(),
 		}
 	}
 	return nil
@@ -96,11 +99,11 @@ func Inspect(out io.Writer, references []string, tmplStr string, getRef GetRefFu
 // Inspect executes the inspect template.
 // It decodes the raw element into a map if the initial execution fails.
 // This allows docker cli to parse inspect structs injected with Swarm fields.
-func (i *TemplateInspector) Inspect(typedElement interface{}, rawElement []byte) error {
+func (i *TemplateInspector) Inspect(typedElement any, rawElement []byte) error {
 	buffer := new(bytes.Buffer)
 	if err := i.tmpl.Execute(buffer, typedElement); err != nil {
 		if rawElement == nil {
-			return errors.Errorf("template parsing error: %v", err)
+			return fmt.Errorf("template parsing error: %w", err)
 		}
 		return i.tryRawInspectFallback(rawElement)
 	}
@@ -112,19 +115,19 @@ func (i *TemplateInspector) Inspect(typedElement interface{}, rawElement []byte)
 // tryRawInspectFallback executes the inspect template with a raw interface.
 // This allows docker cli to parse inspect structs injected with Swarm fields.
 func (i *TemplateInspector) tryRawInspectFallback(rawElement []byte) error {
-	var raw interface{}
+	var raw any
 	buffer := new(bytes.Buffer)
 	rdr := bytes.NewReader(rawElement)
 	dec := json.NewDecoder(rdr)
 	dec.UseNumber()
 
-	if rawErr := dec.Decode(&raw); rawErr != nil {
-		return errors.Errorf("unable to read inspect data: %v", rawErr)
+	if err := dec.Decode(&raw); err != nil {
+		return fmt.Errorf("unable to read inspect data: %w", err)
 	}
 
 	tmplMissingKey := i.tmpl.Option("missingkey=error")
-	if rawErr := tmplMissingKey.Execute(buffer, raw); rawErr != nil {
-		return errors.Errorf("template parsing error: %v", rawErr)
+	if err := tmplMissingKey.Execute(buffer, raw); err != nil {
+		return fmt.Errorf("template parsing error: %w", err)
 	}
 
 	i.buffer.Write(buffer.Bytes())
@@ -150,7 +153,7 @@ func NewIndentedInspector(outputStream io.Writer) Inspector {
 		raw: func(dst *bytes.Buffer, src []byte) error {
 			return json.Indent(dst, src, "", "    ")
 		},
-		el: func(v interface{}) ([]byte, error) {
+		el: func(v any) ([]byte, error) {
 			return json.MarshalIndent(v, "", "    ")
 		},
 	}
@@ -168,13 +171,13 @@ func NewJSONInspector(outputStream io.Writer) Inspector {
 
 type elementsInspector struct {
 	outputStream io.Writer
-	elements     []interface{}
+	elements     []any
 	rawElements  [][]byte
 	raw          func(dst *bytes.Buffer, src []byte) error
-	el           func(v interface{}) ([]byte, error)
+	el           func(v any) ([]byte, error)
 }
 
-func (e *elementsInspector) Inspect(typedElement interface{}, rawElement []byte) error {
+func (e *elementsInspector) Inspect(typedElement any, rawElement []byte) error {
 	if rawElement != nil {
 		e.rawElements = append(e.rawElements, rawElement)
 	} else {

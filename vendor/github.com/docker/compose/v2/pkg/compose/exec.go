@@ -18,12 +18,13 @@ package compose
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command/container"
 	"github.com/docker/compose/v2/pkg/api"
-	moby "github.com/docker/docker/api/types"
+	containerType "github.com/docker/docker/api/types/container"
 )
 
 func (s *composeService) Exec(ctx context.Context, projectName string, options api.RunOptions) (int, error) {
@@ -40,7 +41,6 @@ func (s *composeService) Exec(ctx context.Context, projectName string, options a
 	exec.User = options.User
 	exec.Privileged = options.Privileged
 	exec.Workdir = options.WorkingDir
-	exec.Container = target.ID
 	exec.Command = options.Command
 	for _, v := range options.Environment {
 		err := exec.Env.Set(v)
@@ -49,13 +49,14 @@ func (s *composeService) Exec(ctx context.Context, projectName string, options a
 		}
 	}
 
-	err = container.RunExec(s.dockerCli, exec)
-	if sterr, ok := err.(cli.StatusError); ok {
+	err = container.RunExec(ctx, s.dockerCli, target.ID, exec)
+	var sterr cli.StatusError
+	if errors.As(err, &sterr) {
 		return sterr.StatusCode, nil
 	}
 	return 0, err
 }
 
-func (s *composeService) getExecTarget(ctx context.Context, projectName string, opts api.RunOptions) (moby.Container, error) {
+func (s *composeService) getExecTarget(ctx context.Context, projectName string, opts api.RunOptions) (containerType.Summary, error) {
 	return s.getSpecifiedContainer(ctx, projectName, oneOffInclude, false, opts.Service, opts.Index)
 }

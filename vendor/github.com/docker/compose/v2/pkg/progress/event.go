@@ -153,6 +153,16 @@ func RemovedEvent(id string) Event {
 	return NewEvent(id, Done, "Removed")
 }
 
+// BuildingEvent creates a new Building in progress Event
+func BuildingEvent(id string) Event {
+	return NewEvent(id, Working, "Building")
+}
+
+// BuiltEvent creates a new built (done) Event
+func BuiltEvent(id string) Event {
+	return NewEvent(id, Done, "Built")
+}
+
 // SkippedEvent creates a new Skipped Event
 func SkippedEvent(id string, reason string) Event {
 	return Event{
@@ -176,6 +186,10 @@ func (e *Event) stop() {
 	e.spinner.Stop()
 }
 
+func (e *Event) hasMore() {
+	e.spinner.Restart()
+}
+
 var (
 	spinnerDone    = "✔"
 	spinnerWarning = "!"
@@ -191,6 +205,6 @@ func (e *Event) Spinner() any {
 	case Error:
 		return ErrorColor(spinnerError)
 	default:
-		return e.spinner.String()
+		return CountColor(e.spinner.String())
 	}
 }

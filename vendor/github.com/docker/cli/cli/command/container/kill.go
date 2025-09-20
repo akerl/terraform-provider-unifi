@@ -2,13 +2,12 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/completion"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +27,7 @@ func NewKillCommand(dockerCli command.Cli) *cobra.Command {
 		Args:  cli.RequiresMinArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.containers = args
-			return runKill(dockerCli, &opts)
+			return runKill(cmd.Context(), dockerCli, &opts)
 		},
 		Annotations: map[string]string{
 			"aliases": "docker container kill, docker kill",
@@ -38,24 +37,25 @@ func NewKillCommand(dockerCli command.Cli) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.signal, "signal", "s", "", "Signal to send to the container")
+
+	_ = cmd.RegisterFlagCompletionFunc("signal", completeSignals)
+
 	return cmd
 }
 
-func runKill(dockerCli command.Cli, opts *killOptions) error {
-	var errs []string
-	ctx := context.Background()
+func runKill(ctx context.Context, dockerCLI command.Cli, opts *killOptions) error {
+	apiClient := dockerCLI.Client()
 	errChan := parallelOperation(ctx, opts.containers, func(ctx context.Context, container string) error {
-		return dockerCli.Client().ContainerKill(ctx, container, opts.signal)
+		return apiClient.ContainerKill(ctx, container, opts.signal)
 	})
+
+	var errs []error
 	for _, name := range opts.containers {
 		if err := <-errChan; err != nil {
-			errs = append(errs, err.Error())
-		} else {
-			fmt.Fprintln(dockerCli.Out(), name)
+			errs = append(errs, err)
+			continue
 		}
+		_, _ = fmt.Fprintln(dockerCLI.Out(), name)
 	}
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, "\n"))
-	}
-	return nil
+	return errors.Join(errs...)
 }

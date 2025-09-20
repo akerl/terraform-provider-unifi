@@ -18,14 +18,15 @@ package compose
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/docker/compose/v2/pkg/api"
 )
 
-// logPrinter watch application containers an collect their logs
+// logPrinter watch application containers and collect their logs
 type logPrinter interface {
 	HandleEvent(event api.ContainerEvent)
-	Run(cascadeStop bool, exitCodeFrom string, stopFn func() error) (int, error)
+	Run(cascade api.Cascade, exitCodeFrom string, stopFn func() error) (int, error)
 	Cancel()
 	Stop()
 }
@@ -33,42 +34,60 @@ type logPrinter interface {
 type printer struct {
 	queue    chan api.ContainerEvent
 	consumer api.LogConsumer
-	stopCh   chan struct{}
+	stopCh   chan struct{} // stopCh is a signal channel for producers to stop sending events to the queue
+	stop     sync.Once
 }
 
 // newLogPrinter builds a LogPrinter passing containers logs to LogConsumer
 func newLogPrinter(consumer api.LogConsumer) logPrinter {
-	queue := make(chan api.ContainerEvent)
-	stopCh := make(chan struct{}, 1) // printer MAY stop on his own, so Stop MUST not be blocking
 	printer := printer{
 		consumer: consumer,
-		queue:    queue,
-		stopCh:   stopCh,
+		queue:    make(chan api.ContainerEvent),
+		stopCh:   make(chan struct{}),
+		stop:     sync.Once{},
 	}
 	return &printer
 }
 
 func (p *printer) Cancel() {
-	p.queue <- api.ContainerEvent{
-		Type: api.UserCancel,
-	}
+	// note: HandleEvent is used to ensure this doesn't deadlock
+	p.HandleEvent(api.ContainerEvent{Type: api.UserCancel})
 }
 
 func (p *printer) Stop() {
-	p.stopCh <- struct{}{}
+	p.stop.Do(func() {
+		close(p.stopCh)
+		for {
+			select {
+			case <-p.queue:
+				// purge the queue to free producers goroutines
+				// p.queue will be garbage collected
+			default:
+				return
+			}
+		}
+	})
 }
 
 func (p *printer) HandleEvent(event api.ContainerEvent) {
-	p.queue <- event
+	select {
+	case <-p.stopCh:
+		return
+	default:
+		p.queue <- event
+	}
 }
 
 //nolint:gocyclo
-func (p *printer) Run(cascadeStop bool, exitCodeFrom string, stopFn func() error) (int, error) {
+func (p *printer) Run(cascade api.Cascade, exitCodeFrom string, stopFn func() error) (int, error) {
 	var (
 		aborting bool
 		exitCode int
 	)
-	containers := map[string]struct{}{}
+	defer p.Stop()
+
+	// containers we are tracking. Use true when container is running, false after we receive a stop|die signal
+	containers := map[string]bool{}
 	for {
 		select {
 		case <-p.stopCh:
@@ -79,22 +98,24 @@ func (p *printer) Run(cascadeStop bool, exitCodeFrom string, stopFn func() error
 			case api.UserCancel:
 				aborting = true
 			case api.ContainerEventAttach:
-				if _, ok := containers[id]; ok {
+				if attached, ok := containers[id]; ok && attached {
 					continue
 				}
-				containers[id] = struct{}{}
+				containers[id] = true
 				p.consumer.Register(container)
 			case api.ContainerEventExit, api.ContainerEventStopped, api.ContainerEventRecreated:
-				if !event.Restarting {
-					delete(containers, id)
-				}
-				if !aborting {
+				if !aborting && containers[id] {
 					p.consumer.Status(container, fmt.Sprintf("exited with code %d", event.ExitCode))
 					if event.Type == api.ContainerEventRecreated {
 						p.consumer.Status(container, "has been recreated")
 					}
 				}
-				if cascadeStop {
+				containers[id] = false
+				if !event.Restarting {
+					delete(containers, id)
+				}
+
+				if cascade == api.CascadeStop {
 					if !aborting {
 						aborting = true
 						err := stopFn()
@@ -102,20 +123,32 @@ func (p *printer) Run(cascadeStop bool, exitCodeFrom string, stopFn func() error
 							return 0, err
 						}
 					}
-					if event.Type == api.ContainerEventExit {
-						if exitCodeFrom == "" {
-							exitCodeFrom = event.Service
-						}
-						if exitCodeFrom == event.Service {
-							exitCode = event.ExitCode
+				}
+				if event.Type == api.ContainerEventExit {
+					if cascade == api.CascadeFail && event.ExitCode != 0 {
+						exitCodeFrom = event.Service
+						if !aborting {
+							aborting = true
+							err := stopFn()
+							if err != nil {
+								return 0, err
+							}
 						}
 					}
+					if cascade == api.CascadeStop && exitCodeFrom == "" {
+						exitCodeFrom = event.Service
+					}
+				}
+
+				if exitCodeFrom == event.Service && (event.Type == api.ContainerEventExit || event.Type == api.ContainerEventStopped) {
+					// Container was interrupted or exited, let's capture exit code
+					exitCode = event.ExitCode
 				}
 				if len(containers) == 0 {
 					// Last container terminated, done
 					return exitCode, nil
 				}
-			case api.ContainerEventLog:
+			case api.ContainerEventLog, api.HookEventLog:
 				if !aborting {
 					p.consumer.Log(container, event.Line)
 				}

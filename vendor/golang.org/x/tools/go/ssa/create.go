@@ -15,7 +15,6 @@ import (
 	"os"
 	"sync"
 
-	"golang.org/x/tools/internal/typeparams"
 	"golang.org/x/tools/internal/versions"
 )
 
@@ -35,13 +34,12 @@ import (
 // See the Example tests for simple examples.
 func NewProgram(fset *token.FileSet, mode BuilderMode) *Program {
 	return &Program{
-		Fset:          fset,
-		imported:      make(map[string]*Package),
-		packages:      make(map[*types.Package]*Package),
-		mode:          mode,
-		canon:         newCanonizer(),
-		ctxt:          typeparams.NewContext(),
-		parameterized: tpWalker{seen: make(map[types.Type]bool)},
+		Fset:     fset,
+		imported: make(map[string]*Package),
+		packages: make(map[*types.Package]*Package),
+		mode:     mode,
+		canon:    newCanonizer(),
+		ctxt:     types.NewContext(),
 	}
 }
 
@@ -98,8 +96,9 @@ func memberFromObject(pkg *Package, obj types.Object, syntax ast.Node, goversion
 			pkg.ninit++
 			name = fmt.Sprintf("init#%d", pkg.ninit)
 		}
-		fn := createFunction(pkg.Prog, obj, name, syntax, pkg.info, goversion, &pkg.created)
+		fn := createFunction(pkg.Prog, obj, name, syntax, pkg.info, goversion)
 		fn.Pkg = pkg
+		pkg.created = append(pkg.created, fn)
 		pkg.objects[obj] = fn
 		if name != "_" && sig.Recv() == nil {
 			pkg.Members[name] = fn // package-level function
@@ -113,14 +112,14 @@ func memberFromObject(pkg *Package, obj types.Object, syntax ast.Node, goversion
 // createFunction creates a function or method. It supports both
 // CreatePackage (with or without syntax) and the on-demand creation
 // of methods in non-created packages based on their types.Func.
-func createFunction(prog *Program, obj *types.Func, name string, syntax ast.Node, info *types.Info, goversion string, cr *creator) *Function {
+func createFunction(prog *Program, obj *types.Func, name string, syntax ast.Node, info *types.Info, goversion string) *Function {
 	sig := obj.Type().(*types.Signature)
 
 	// Collect type parameters.
-	var tparams *typeparams.TypeParamList
-	if rtparams := typeparams.RecvTypeParams(sig); rtparams.Len() > 0 {
+	var tparams *types.TypeParamList
+	if rtparams := sig.RecvTypeParams(); rtparams.Len() > 0 {
 		tparams = rtparams // method of generic type
-	} else if sigparams := typeparams.ForSignature(sig); sigparams.Len() > 0 {
+	} else if sigparams := sig.TypeParams(); sigparams.Len() > 0 {
 		tparams = sigparams // generic function
 	}
 
@@ -145,7 +144,6 @@ func createFunction(prog *Program, obj *types.Func, name string, syntax ast.Node
 	if tparams.Len() > 0 {
 		fn.generic = new(generic)
 	}
-	cr.Add(fn)
 	return fn
 }
 
@@ -186,19 +184,6 @@ func membersFromDecl(pkg *Package, decl ast.Decl, goversion string) {
 	}
 }
 
-// creator tracks functions that have finished their CREATE phases.
-//
-// All Functions belong to the same Program. May have differing packages.
-//
-// creators are not thread-safe.
-type creator []*Function
-
-func (c *creator) Add(fn *Function) {
-	*c = append(*c, fn)
-}
-func (c *creator) At(i int) *Function { return (*c)[i] }
-func (c *creator) Len() int           { return len(*c) }
-
 // CreatePackage creates and returns an SSA Package from the
 // specified type-checked, error-free file ASTs, and populates its
 // Members mapping.
@@ -208,11 +193,7 @@ func (c *creator) Len() int           { return len(*c) }
 //
 // The real work of building SSA form for each function is not done
 // until a subsequent call to Package.Build.
-//
-// CreatePackage should not be called after building any package in
-// the program.
 func (prog *Program) CreatePackage(pkg *types.Package, files []*ast.File, info *types.Info, importable bool) *Package {
-	// TODO(adonovan): assert that no package has yet been built.
 	if pkg == nil {
 		panic("nil pkg") // otherwise pkg.Scope below returns types.Universe!
 	}
@@ -240,13 +221,13 @@ func (prog *Program) CreatePackage(pkg *types.Package, files []*ast.File, info *
 		goversion: "", // See Package.build for details.
 	}
 	p.Members[p.init.name] = p.init
-	p.created.Add(p.init)
+	p.created = append(p.created, p.init)
 
 	// Allocate all package members: vars, funcs, consts and types.
 	if len(files) > 0 {
 		// Go source package.
 		for _, file := range files {
-			goversion := versions.Lang(versions.FileVersions(p.info, file))
+			goversion := versions.Lang(versions.FileVersion(p.info, file))
 			for _, decl := range file.Decls {
 				membersFromDecl(p, decl, goversion)
 			}
@@ -260,6 +241,7 @@ func (prog *Program) CreatePackage(pkg *types.Package, files []*ast.File, info *
 			obj := scope.Lookup(name)
 			memberFromObject(p, obj, nil, "")
 			if obj, ok := obj.(*types.TypeName); ok {
+				// No Unalias: aliases should not duplicate methods.
 				if named, ok := obj.Type().(*types.Named); ok {
 					for i, n := 0, named.NumMethods(); i < n; i++ {
 						memberFromObject(p, named.Method(i), nil, "")
@@ -301,7 +283,7 @@ func (prog *Program) CreatePackage(pkg *types.Package, files []*ast.File, info *
 var printMu sync.Mutex
 
 // AllPackages returns a new slice containing all packages created by
-// prog.CreatePackage in in unspecified order.
+// prog.CreatePackage in unspecified order.
 func (prog *Program) AllPackages() []*Package {
 	pkgs := make([]*Package, 0, len(prog.packages))
 	for _, pkg := range prog.packages {

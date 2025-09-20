@@ -27,9 +27,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/pkg/errors"
+	pathutil "github.com/docker/compose/v2/internal/paths"
 	"github.com/sirupsen/logrus"
-
 	"github.com/tilt-dev/fsnotify"
 )
 
@@ -46,8 +45,6 @@ type naiveNotify struct {
 	// the notify list. It might be better to store this in a tree
 	// structure, so we can filter the list quickly.
 	notifyList map[string]bool
-
-	ignore PathMatcher
 
 	isWatcherRecursive bool
 	watcher            *fsnotify.Watcher
@@ -72,13 +69,13 @@ func (d *naiveNotify) Start() error {
 		return err
 	}
 	if d.isWatcherRecursive {
-		pathsToWatch = dedupePathsForRecursiveWatcher(pathsToWatch)
+		pathsToWatch = pathutil.EncompassingPaths(pathsToWatch)
 	}
 
 	for _, name := range pathsToWatch {
 		fi, err := os.Stat(name)
 		if err != nil && !os.IsNotExist(err) {
-			return errors.Wrapf(err, "notify.Add(%q)", name)
+			return fmt.Errorf("notify.Add(%q): %w", name, err)
 		}
 
 		// if it's a file that doesn't exist,
@@ -90,12 +87,12 @@ func (d *naiveNotify) Start() error {
 		if fi.IsDir() {
 			err = d.watchRecursively(name)
 			if err != nil {
-				return errors.Wrapf(err, "notify.Add(%q)", name)
+				return fmt.Errorf("notify.Add(%q): %w", name, err)
 			}
 		} else {
 			err = d.add(filepath.Dir(name))
 			if err != nil {
-				return errors.Wrapf(err, "notify.Add(%q)", filepath.Dir(name))
+				return fmt.Errorf("notify.Add(%q): %w", filepath.Dir(name), err)
 			}
 		}
 	}
@@ -111,7 +108,7 @@ func (d *naiveNotify) watchRecursively(dir string) error {
 		if err == nil || os.IsNotExist(err) {
 			return nil
 		}
-		return errors.Wrapf(err, "watcher.Add(%q)", dir)
+		return fmt.Errorf("watcher.Add(%q): %w", dir, err)
 	}
 
 	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
@@ -123,12 +120,7 @@ func (d *naiveNotify) watchRecursively(dir string) error {
 			return nil
 		}
 
-		shouldSkipDir, err := d.shouldSkipDir(path)
-		if err != nil {
-			return err
-		}
-
-		if shouldSkipDir {
+		if d.shouldSkipDir(path) {
 			logrus.Debugf("Ignoring directory and its contents (recursively): %s", path)
 			return filepath.SkipDir
 		}
@@ -138,7 +130,7 @@ func (d *naiveNotify) watchRecursively(dir string) error {
 			if os.IsNotExist(err) {
 				return nil
 			}
-			return errors.Wrapf(err, "watcher.Add(%q)", path)
+			return fmt.Errorf("watcher.Add(%q): %w", path, err)
 		}
 		return nil
 	})
@@ -169,14 +161,14 @@ func (d *naiveNotify) loop() { //nolint:gocyclo
 
 		if e.Op&fsnotify.Create != fsnotify.Create {
 			if d.shouldNotify(e.Name) {
-				d.wrappedEvents <- FileEvent{e.Name}
+				d.wrappedEvents <- FileEvent(e.Name)
 			}
 			continue
 		}
 
 		if d.isWatcherRecursive {
 			if d.shouldNotify(e.Name) {
-				d.wrappedEvents <- FileEvent{e.Name}
+				d.wrappedEvents <- FileEvent(e.Name)
 			}
 			continue
 		}
@@ -192,7 +184,7 @@ func (d *naiveNotify) loop() { //nolint:gocyclo
 			}
 
 			if d.shouldNotify(path) {
-				d.wrappedEvents <- FileEvent{path}
+				d.wrappedEvents <- FileEvent(path)
 			}
 
 			// TODO(dmiller): symlinks 😭
@@ -200,11 +192,7 @@ func (d *naiveNotify) loop() { //nolint:gocyclo
 			shouldWatch := false
 			if info.IsDir() {
 				// watch directories unless we can skip them entirely
-				shouldSkipDir, err := d.shouldSkipDir(path)
-				if err != nil {
-					return err
-				}
-				if shouldSkipDir {
+				if d.shouldSkipDir(path) {
 					return filepath.SkipDir
 				}
 
@@ -231,14 +219,6 @@ func (d *naiveNotify) loop() { //nolint:gocyclo
 }
 
 func (d *naiveNotify) shouldNotify(path string) bool {
-	ignore, err := d.ignore.Matches(path)
-	if err != nil {
-		logrus.Infof("Error matching path %q: %v", path, err)
-	} else if ignore {
-		logrus.Tracef("Ignoring event for path: %v", path)
-		return false
-	}
-
 	if _, ok := d.notifyList[path]; ok {
 		// We generally don't care when directories change at the root of an ADD
 		stat, err := os.Lstat(path)
@@ -247,26 +227,17 @@ func (d *naiveNotify) shouldNotify(path string) bool {
 	}
 
 	for root := range d.notifyList {
-		if IsChild(root, path) {
+		if pathutil.IsChild(root, path) {
 			return true
 		}
 	}
 	return false
 }
 
-func (d *naiveNotify) shouldSkipDir(path string) (bool, error) {
+func (d *naiveNotify) shouldSkipDir(path string) bool {
 	// If path is directly in the notifyList, we should always watch it.
 	if d.notifyList[path] {
-		return false, nil
-	}
-
-	skip, err := d.ignore.MatchesEntireDir(path)
-	if err != nil {
-		return false, errors.Wrap(err, "shouldSkipDir")
-	}
-
-	if skip {
-		return true, nil
+		return false
 	}
 
 	// Suppose we're watching
@@ -282,11 +253,11 @@ func (d *naiveNotify) shouldSkipDir(path string) (bool, error) {
 	// - A parent of a directory that's in our notify list
 	//   (i.e., to cover the "path doesn't exist" case).
 	for root := range d.notifyList {
-		if IsChild(root, path) || IsChild(path, root) {
-			return false, nil
+		if pathutil.IsChild(root, path) || pathutil.IsChild(path, root) {
+			return false
 		}
 	}
-	return true, nil
+	return true
 }
 
 func (d *naiveNotify) add(path string) error {
@@ -299,19 +270,15 @@ func (d *naiveNotify) add(path string) error {
 	return nil
 }
 
-func newWatcher(paths []string, ignore PathMatcher) (Notify, error) {
-	if ignore == nil {
-		return nil, fmt.Errorf("newWatcher: ignore is nil")
-	}
-
+func newWatcher(paths []string) (Notify, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		if strings.Contains(err.Error(), "too many open files") && runtime.GOOS == "linux" {
-			return nil, fmt.Errorf("Hit OS limits creating a watcher.\n" +
+			return nil, fmt.Errorf("hit OS limits creating a watcher.\n" +
 				"Run 'sysctl fs.inotify.max_user_instances' to check your inotify limits.\n" +
 				"To raise them, run 'sudo sysctl fs.inotify.max_user_instances=1024'")
 		}
-		return nil, errors.Wrap(err, "creating file watcher")
+		return nil, fmt.Errorf("creating file watcher: %w", err)
 	}
 	MaybeIncreaseBufferSize(fsw)
 
@@ -321,19 +288,18 @@ func newWatcher(paths []string, ignore PathMatcher) (Notify, error) {
 	wrappedEvents := make(chan FileEvent)
 	notifyList := make(map[string]bool, len(paths))
 	if isWatcherRecursive {
-		paths = dedupePathsForRecursiveWatcher(paths)
+		paths = pathutil.EncompassingPaths(paths)
 	}
 	for _, path := range paths {
 		path, err := filepath.Abs(path)
 		if err != nil {
-			return nil, errors.Wrap(err, "newWatcher")
+			return nil, fmt.Errorf("newWatcher: %w", err)
 		}
 		notifyList[path] = true
 	}
 
 	wmw := &naiveNotify{
 		notifyList:         notifyList,
-		ignore:             ignore,
 		watcher:            fsw,
 		events:             fsw.Events,
 		wrappedEvents:      wrappedEvents,
@@ -351,7 +317,7 @@ func greatestExistingAncestors(paths []string) ([]string, error) {
 	for _, p := range paths {
 		newP, err := greatestExistingAncestor(p)
 		if err != nil {
-			return nil, fmt.Errorf("Finding ancestor of %s: %v", p, err)
+			return nil, fmt.Errorf("finding ancestor of %s: %w", p, err)
 		}
 		result = append(result, newP)
 	}
