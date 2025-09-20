@@ -269,7 +269,7 @@ func TestAccDevice_switch_portOverrides(t *testing.T) {
 					resource.TestCheckResourceAttr(resourceName, "port_override.0.name", ""),
 					resource.TestCheckResourceAttr(resourceName, "port_override.0.port_profile_id", ""),
 					resource.TestCheckResourceAttr(resourceName, "port_override.0.op_mode", "aggregate"),
-					resource.TestCheckResourceAttr(resourceName, "port_override.0.aggregate_num_ports", "2"),
+					resource.TestCheckResourceAttr(resourceName, "port_override.0.aggregate_members", "[3, 4]"),
 
 					resource.TestCheckResourceAttr(resourceName, "port_override.1.number", "1"),
 					resource.TestCheckResourceAttr(resourceName, "port_override.1.name", "Port 1"),
@@ -341,7 +341,7 @@ resource "unifi_device" "test" {
 	port_override {
 		number              = 3
 		op_mode             = "aggregate"
-		aggregate_num_ports = 2
+		aggregate_members = [3, 4]
 	}
 
 	port_override {

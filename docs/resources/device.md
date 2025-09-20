@@ -53,7 +53,7 @@ resource "unifi_device" "us_24_poe" {
   port_override {
     number              = 11
     op_mode             = "aggregate"
-    aggregate_num_ports = 2
+    aggregate_members = [11, 12]
   }
 }
 ```
@@ -84,7 +84,7 @@ Required:
 
 Optional:
 
-- `aggregate_num_ports` (Number) Number of ports in the aggregate.
+- `aggregate_members` (List of Numbers) List of port numbers in the aggregate.
 - `name` (String) Human-readable name of the port.
 - `op_mode` (String) Operating mode of the port, valid values are `switch`, `mirror`, and `aggregate`. Defaults to `switch`.
 - `port_profile_id` (String) ID of the Port Profile used on this port.
