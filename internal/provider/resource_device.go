@@ -359,7 +359,6 @@ func setFromPortOverrides(pos []unifi.DevicePortOverrides) ([]map[string]interfa
 }
 
 func toPortOverride(data map[string]interface{}) (unifi.DevicePortOverrides, error) {
-	idx := int64(data["number"].(int))
 	name := data["name"].(string)
 	profileID := data["port_profile_id"].(string)
 	opMode := data["op_mode"].(string)
@@ -368,13 +367,13 @@ func toPortOverride(data map[string]interface{}) (unifi.DevicePortOverrides, err
 	aggregateMembersRaw := data["aggregate_members"].([]interface{})
 	aggregateMembers := []int64{}
 	for _, v := range aggregateMembersRaw {
-		aggregateMembers = append(aggregateMembers, v.(int64))
+		aggregateMembers = append(aggregateMembers, int64(v.(int)))
 	}
 
 	nativeNetworkID := data["native_network_id"].(string)
 
 	return unifi.DevicePortOverrides{
-		PortIDX:          &idx,
+		PortIDX:          i64ptr(data["number"].(int)),
 		Name:             name,
 		PortProfileID:    profileID,
 		OpMode:           opMode,

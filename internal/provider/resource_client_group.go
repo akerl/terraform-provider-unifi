@@ -81,12 +81,10 @@ func resourceClientGroupCreate(ctx context.Context, d *schema.ResourceData, meta
 }
 
 func resourceClientGroupGetResourceData(d *schema.ResourceData) (*unifi.ClientGroup, error) {
-	qos_down := int64(d.Get("qos_rate_max_down").(int))
-	qos_up := int64(d.Get("qos_rate_max_up").(int))
 	return &unifi.ClientGroup{
 		Name:           d.Get("name").(string),
-		QOSRateMaxDown: &qos_down,
-		QOSRateMaxUp:   &qos_up,
+		QOSRateMaxDown: i64ptr(d.Get("qos_rate_max_down").(int)),
+		QOSRateMaxUp:   i64ptr(d.Get("qos_rate_max_up").(int)),
 	}, nil
 }
 

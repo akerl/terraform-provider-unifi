@@ -348,10 +348,10 @@ func resourceWLANGetResourceData(d *schema.ResourceData, meta interface{}) (*uni
 		MinrateSettingPreference: minrateSettingPreference,
 
 		MinrateNgEnabled:      d.Get("minimum_data_rate_2g_kbps").(int) != 0,
-		MinrateNgDataRateKbps: i64ptr(d.Get("minimum_data_rate_2g_kbps").(int64)),
+		MinrateNgDataRateKbps: i64ptr(d.Get("minimum_data_rate_2g_kbps").(int)),
 
 		MinrateNaEnabled:      d.Get("minimum_data_rate_5g_kbps").(int) != 0,
-		MinrateNaDataRateKbps: i64ptr(d.Get("minimum_data_rate_5g_kbps").(int64)),
+		MinrateNaDataRateKbps: i64ptr(d.Get("minimum_data_rate_5g_kbps").(int)),
 	}, nil
 }
 
@@ -531,9 +531,9 @@ func toSchedule(data map[string]interface{}) unifi.WLANScheduleWithDuration {
 
 	return unifi.WLANScheduleWithDuration{
 		StartDaysOfWeek: []string{dow},
-		StartHour:       i64ptr(int64(startHour)),
-		StartMinute:     i64ptr(int64(startMinute)),
-		DurationMinutes: i64ptr(int64(duration)),
+		StartHour:       i64ptr(startHour),
+		StartMinute:     i64ptr(startMinute),
+		DurationMinutes: i64ptr(duration),
 		Name:            name,
 	}
 }

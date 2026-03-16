@@ -169,13 +169,11 @@ func resourceAccountSetResourceData(resp *unifi.Account, d *schema.ResourceData,
 }
 
 func resourceAccountGetResourceData(d *schema.ResourceData) (*unifi.Account, error) {
-	tunnelType := int64(d.Get("tunnel_type").(int))
-	tunnelMediumType := int64(d.Get("tunnel_medium_type").(int))
 	return &unifi.Account{
 		Name:             d.Get("name").(string),
 		Password:         d.Get("password").(string),
-		TunnelType:       &tunnelType,
-		TunnelMediumType: &tunnelMediumType,
+		TunnelType:       i64ptr(d.Get("tunnel_type").(int)),
+		TunnelMediumType: i64ptr(d.Get("tunnel_medium_type").(int)),
 		NetworkID:        d.Get("network_id").(string),
 	}, nil
 }

@@ -360,4 +360,4 @@ require (
 	tags.cncf.io/container-device-interface v1.1.0 // indirect
 )
 
-replace github.com/ubiquiti-community/go-unifi => github.com/akerl/go-unifi v0.0.0-20260316031309-c708955c8543
+replace github.com/ubiquiti-community/go-unifi => github.com/akerl/go-unifi v0.0.0-20260316033048-6b75af996d7b

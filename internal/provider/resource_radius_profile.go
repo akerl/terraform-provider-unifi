@@ -179,7 +179,7 @@ func setToAcctServers(set []interface{}) ([]unifi.RADIUSProfileAcctServers, erro
 func toAuthServer(data map[string]interface{}) (unifi.RADIUSProfileAuthServers, error) {
 	return unifi.RADIUSProfileAuthServers{
 		IP:     data["ip"].(string),
-		Port:   i64ptr(data["port"].(int64)),
+		Port:   i64ptr(data["port"].(int)),
 		Secret: data["xsecret"].(string),
 	}, nil
 }
@@ -187,7 +187,7 @@ func toAuthServer(data map[string]interface{}) (unifi.RADIUSProfileAuthServers, 
 func toAcctServer(data map[string]interface{}) (unifi.RADIUSProfileAcctServers, error) {
 	return unifi.RADIUSProfileAcctServers{
 		IP:     data["ip"].(string),
-		Port:   i64ptr(data["port"].(int64)),
+		Port:   i64ptr(data["port"].(int)),
 		Secret: data["xsecret"].(string),
 	}, nil
 }
@@ -264,7 +264,7 @@ func resourceRadiusProfileGetResourceData(d *schema.ResourceData) (*unifi.RADIUS
 	return &unifi.RADIUSProfile{
 		Name:                  d.Get("name").(string),
 		InterimUpdateEnabled:  d.Get("interim_update_enabled").(bool),
-		InterimUpdateInterval: i64ptr(d.Get("interim_update_interval").(int64)),
+		InterimUpdateInterval: i64ptr(d.Get("interim_update_interval").(int)),
 		AccountingEnabled:     d.Get("accounting_enabled").(bool),
 		UseUsgAcctServer:      d.Get("use_usg_acct_server").(bool),
 		UseUsgAuthServer:      d.Get("use_usg_auth_server").(bool),

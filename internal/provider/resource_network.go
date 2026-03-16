@@ -400,7 +400,7 @@ func resourceNetworkCreate(ctx context.Context, d *schema.ResourceData, meta int
 func resourceNetworkGetResourceData(d *schema.ResourceData, meta interface{}) (*unifi.Network, error) {
 	// c := meta.(*client)
 
-	vlan := d.Get("vlan_id").(int64)
+	vlan := d.Get("vlan_id").(int)
 	dhcpDNS, err := listToStringSlice(d.Get("dhcp_dns").([]interface{}))
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert dhcp_dns to string slice: %w", err)
@@ -414,44 +414,22 @@ func resourceNetworkGetResourceData(d *schema.ResourceData, meta interface{}) (*
 		return nil, fmt.Errorf("unable to convert wan_dns to string slice: %w", err)
 	}
 
-	name := d.Get("name").(string)
-	subnet := cidrOneBased(d.Get("subnet").(string))
-	group := d.Get("network_group").(string)
-	dhcpStart := d.Get("dhcp_start").(string)
-	dhcpStop := d.Get("dhcp_stop").(string)
-	dhcpLease := d.Get("dhcp_lease").(int64)
-	dhcpdBootFilename := d.Get("dhcpd_boot_filename").(string)
-	domainName := d.Get("domain_name").(string)
-
-	dhcpv6Lease := d.Get("dhcp_v6_lease").(int64)
-	dhcpv6Start := d.Get("dhcp_v6_start").(string)
-	dhcpv6Stop := d.Get("dhcp_v6_stop").(string)
-
-	ipv6InterfaceType := d.Get("ipv6_interface_type").(string)
-	ipv6StaticSubnet := d.Get("ipv6_static_subnet").(string)
-	ipv6PDInterface := d.Get("ipv6_pd_interface").(string)
-	ipv6PDStart := d.Get("ipv6_pd_start").(string)
-	ipv6PDStop := d.Get("ipv6_pd_stop").(string)
-	ipv6RaPreferredLifetime := d.Get("ipv6_ra_preferred_lifetime").(int64)
-	ipv6RaPriority := d.Get("ipv6_ra_priority").(string)
-	ipv6RaValidLifetime := d.Get("ipv6_ra_valid_lifetime").(int64)
-
 	return &unifi.Network{
-		Name:                    &name,
+		Name:                    sptr(d.Get("name").(string)),
 		Purpose:                 d.Get("purpose").(string),
-		VLAN:                    &vlan,
-		IPSubnet:                &subnet,
-		NetworkGroup:            &group,
+		VLAN:                    i64ptr(d.Get("vlan_id").(int)),
+		IPSubnet:                sptr(cidrOneBased(d.Get("subnet").(string))),
+		NetworkGroup:            sptr(d.Get("network_group").(string)),
 		NetworkIsolationEnabled: d.Get("network_isolation_enabled").(bool),
-		DHCPDStart:              &dhcpStart,
-		DHCPDStop:               &dhcpStop,
+		DHCPDStart:              sptr(d.Get("dhcp_start").(string)),
+		DHCPDStop:               sptr(d.Get("dhcp_stop").(string)),
 		DHCPDEnabled:            d.Get("dhcp_enabled").(bool),
-		DHCPDLeaseTime:          &dhcpLease,
+		DHCPDLeaseTime:          i64ptr(d.Get("dhcp_lease").(int)),
 		DHCPDBootEnabled:        d.Get("dhcpd_boot_enabled").(bool),
 		DHCPDBootServer:         d.Get("dhcpd_boot_server").(string),
-		DHCPDBootFilename:       &dhcpdBootFilename,
+		DHCPDBootFilename:       sptr(d.Get("dhcpd_boot_filename").(string)),
 		DHCPRelayEnabled:        d.Get("dhcp_relay_enabled").(bool),
-		DomainName:              &domainName,
+		DomainName:              sptr(d.Get("domain_name").(string)),
 		IGMPSnooping:            d.Get("igmp_snooping").(bool),
 		MdnsEnabled:             d.Get("multicast_dns").(bool),
 
@@ -474,20 +452,20 @@ func resourceNetworkGetResourceData(d *schema.ResourceData, meta interface{}) (*
 
 		DHCPDV6DNSAuto:   d.Get("dhcp_v6_dns_auto").(bool),
 		DHCPDV6Enabled:   d.Get("dhcp_v6_enabled").(bool),
-		DHCPDV6LeaseTime: &dhcpv6Lease,
-		DHCPDV6Start:     &dhcpv6Start,
-		DHCPDV6Stop:      &dhcpv6Stop,
+		DHCPDV6LeaseTime: i64ptr(d.Get("dhcp_v6_lease").(int)),
+		DHCPDV6Start:     sptr(d.Get("dhcp_v6_start").(string)),
+		DHCPDV6Stop:      sptr(d.Get("dhcp_v6_stop").(string)),
 
-		IPV6InterfaceType:       &ipv6InterfaceType,
-		IPV6Subnet:              &ipv6StaticSubnet,
-		IPV6PDInterface:         &ipv6PDInterface,
+		IPV6InterfaceType:       sptr(d.Get("ipv6_interface_type").(string)),
+		IPV6Subnet:              sptr(d.Get("ipv6_static_subnet").(string)),
+		IPV6PDInterface:         sptr(d.Get("ipv6_pd_interface").(string)),
 		IPV6PDPrefixid:          d.Get("ipv6_pd_prefixid").(string),
-		IPV6PDStart:             &ipv6PDStart,
-		IPV6PDStop:              &ipv6PDStop,
+		IPV6PDStart:             sptr(d.Get("ipv6_pd_start").(string)),
+		IPV6PDStop:              sptr(d.Get("ipv6_pd_stop").(string)),
 		IPV6RaEnabled:           d.Get("ipv6_ra_enable").(bool),
-		IPV6RaPreferredLifetime: &ipv6RaPreferredLifetime,
-		IPV6RaPriority:          &ipv6RaPriority,
-		IPV6RaValidLifetime:     &ipv6RaValidLifetime,
+		IPV6RaPreferredLifetime: i64ptr(d.Get("ipv6_ra_preferred_lifetime").(int)),
+		IPV6RaPriority:          sptr(d.Get("ipv6_ra_priority").(string)),
+		IPV6RaValidLifetime:     i64ptr(d.Get("ipv6_ra_valid_lifetime").(int)),
 
 		InternetAccessEnabled: d.Get("internet_access_enabled").(bool),
 
@@ -496,15 +474,15 @@ func resourceNetworkGetResourceData(d *schema.ResourceData, meta interface{}) (*
 		WANNetmask:      sptr(d.Get("wan_netmask").(string)),
 		WANGateway:      sptr(d.Get("wan_gateway").(string)),
 		WANNetworkGroup: sptr(d.Get("wan_networkgroup").(string)),
-		WANEgressQOS:    i64ptr(d.Get("wan_egress_qos").(int64)),
+		WANEgressQOS:    i64ptr(d.Get("wan_egress_qos").(int)),
 		WANUsername:     d.Get("wan_username").(string),
 		WANPassword:     d.Get("x_wan_password").(string),
 
 		WANTypeV6:       sptr(d.Get("wan_type_v6").(string)),
-		WANDHCPv6PDSize: i64ptr(d.Get("wan_dhcp_v6_pd_size").(int64)),
+		WANDHCPv6PDSize: i64ptr(d.Get("wan_dhcp_v6_pd_size").(int)),
 		WANIPV6:         d.Get("wan_ipv6").(string),
 		WANGatewayV6:    d.Get("wan_gateway_v6").(string),
-		WANPrefixlen:    i64ptr(d.Get("wan_prefixlen").(int64)),
+		WANPrefixlen:    i64ptr(d.Get("wan_prefixlen").(int)),
 
 		// this is kinda hacky but ¯\_(ツ)_/¯
 
@@ -519,8 +497,9 @@ func sptr(s string) *string {
 	return &s
 }
 
-func i64ptr(i int64) *int64 {
-	return &i
+func i64ptr(i int) *int64 {
+	v := int64(i)
+	return &v
 }
 
 func sderef(s *string) string {
@@ -556,6 +535,9 @@ func resourceNetworkSetResourceData(resp *unifi.Network, d *schema.ResourceData,
 			&resp.WANDNS4,
 		} {
 			if dns == nil {
+				continue
+			}
+			if *dns == "" {
 				continue
 			}
 			wanDNS = append(wanDNS, *dns)
