@@ -1586,7 +1586,7 @@ github.com/tonistiigi/units
 # github.com/tonistiigi/vt100 v0.0.0-20240514184818-90bafcd6abab
 ## explicit; go 1.12
 github.com/tonistiigi/vt100
-# github.com/ubiquiti-community/go-unifi v1.33.42
+# github.com/ubiquiti-community/go-unifi v1.33.42 => github.com/akerl/go-unifi v0.0.0-20260316031309-c708955c8543
 ## explicit; go 1.24.9
 github.com/ubiquiti-community/go-unifi/unifi
 github.com/ubiquiti-community/go-unifi/unifi/settings
@@ -2323,3 +2323,4 @@ mvdan.cc/unparam/check
 # tags.cncf.io/container-device-interface v1.1.0
 ## explicit; go 1.21
 tags.cncf.io/container-device-interface/pkg/parser
+# github.com/ubiquiti-community/go-unifi => github.com/akerl/go-unifi v0.0.0-20260316031309-c708955c8543

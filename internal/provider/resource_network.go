@@ -523,6 +523,13 @@ func i64ptr(i int64) *int64 {
 	return &i
 }
 
+func sderef(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func safeDNSLookup(list []string, index int) string {
 	return append(list, "", "", "", "")[index]
 }
@@ -605,7 +612,7 @@ func resourceNetworkSetResourceData(resp *unifi.Network, d *schema.ResourceData,
 	d.Set("name", resp.Name)
 	d.Set("purpose", resp.Purpose)
 	d.Set("vlan_id", vlan)
-	d.Set("subnet", cidrZeroBased(*resp.IPSubnet))
+	d.Set("subnet", cidrZeroBased(sderef(resp.IPSubnet)))
 	d.Set("network_group", resp.NetworkGroup)
 	d.Set("network_isolation_enabled", resp.NetworkIsolationEnabled)
 

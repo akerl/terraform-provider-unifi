@@ -33,28 +33,30 @@ type RADIUSProfile struct {
 	NoDelete bool   `json:"attr_no_delete,omitempty"`
 	NoEdit   bool   `json:"attr_no_edit,omitempty"`
 
-	AccountingEnabled         bool                       `json:"accounting_enabled"`
-	AcctServers               []RADIUSProfileAcctServers `json:"acct_servers,omitempty"`
-	AuthServers               []RADIUSProfileAuthServers `json:"auth_servers,omitempty"`
-	InterimUpdateEnabled      bool                       `json:"interim_update_enabled"`
-	InterimUpdateInterval     *int64                     `json:"interim_update_interval,omitempty"` // ^([6-9][0-9]|[1-9][0-9]{2,3}|[1-7][0-9]{4}|8[0-5][0-9]{3}|86[0-3][0-9][0-9]|86400)$
-	Name                      string                     `json:"name,omitempty"`                    // .{1,128}
-	TlsEnabled                bool                       `json:"tls_enabled"`
-	UseUsgAcctServer          bool                       `json:"use_usg_acct_server"`
-	UseUsgAuthServer          bool                       `json:"use_usg_auth_server"`
-	VLANEnabled               bool                       `json:"vlan_enabled"`
-	VLANWLANMode              string                     `json:"vlan_wlan_mode,omitempty"` // disabled|optional|required
-	XCaCrts                   []RADIUSProfileXCaCrts     `json:"x_ca_crts,omitempty"`
-	XClientCrt                string                     `json:"x_client_crt,omitempty"`
-	XClientCrtFilename        string                     `json:"x_client_crt_filename,omitempty"`
-	XClientPrivateKey         string                     `json:"x_client_private_key,omitempty"`
-	XClientPrivateKeyFilename string                     `json:"x_client_private_key_filename,omitempty"`
-	XClientPrivateKeyPassword string                     `json:"x_client_private_key_password,omitempty"`
+	AccountingEnabled        bool                       `json:"accounting_enabled"`
+	AcctServers              []RADIUSProfileAcctServers `json:"acct_servers,omitempty"`
+	AuthServers              []RADIUSProfileAuthServers `json:"auth_servers,omitempty"`
+	CaCrts                   []RADIUSProfileCaCrts      `json:"x_ca_crts,omitempty"`
+	ClientCrt                string                     `json:"x_client_crt,omitempty"`
+	ClientCrtFilename        string                     `json:"x_client_crt_filename,omitempty"`
+	ClientPrivateKey         string                     `json:"x_client_private_key,omitempty"`
+	ClientPrivateKeyFilename string                     `json:"x_client_private_key_filename,omitempty"`
+	ClientPrivateKeyPassword string                     `json:"x_client_private_key_password,omitempty"`
+	InterimUpdateEnabled     bool                       `json:"interim_update_enabled"`
+	InterimUpdateInterval    *int64                     `json:"interim_update_interval,omitempty"` // ^([6-9][0-9]|[1-9][0-9]{2,3}|[1-7][0-9]{4}|8[0-5][0-9]{3}|86[0-3][0-9][0-9]|86400)$
+	Name                     string                     `json:"name,omitempty"`                    // .{1,128}
+	TlsEnabled               bool                       `json:"tls_enabled"`
+	UseUsgAcctServer         bool                       `json:"use_usg_acct_server"`
+	UseUsgAuthServer         bool                       `json:"use_usg_auth_server"`
+	VLANEnabled              bool                       `json:"vlan_enabled"`
+	VLANWLANMode             string                     `json:"vlan_wlan_mode,omitempty"` // disabled|optional|required
 }
 
 func (dst *RADIUSProfile) UnmarshalJSON(b []byte) error {
 	type Alias RADIUSProfile
 	aux := &struct {
+		InterimUpdateInterval *types.Number `json:"interim_update_interval"`
+
 		*Alias
 	}{
 		Alias: (*Alias)(dst),
@@ -63,20 +65,30 @@ func (dst *RADIUSProfile) UnmarshalJSON(b []byte) error {
 	err := json.Unmarshal(b, &aux)
 	if err != nil {
 		return fmt.Errorf("unable to unmarshal alias: %w", err)
+	}
+	if aux.InterimUpdateInterval != nil {
+		if val, err := aux.InterimUpdateInterval.Int64(); err == nil {
+			dst.InterimUpdateInterval = &val
+		} else if string(*aux.InterimUpdateInterval) == "" {
+			var zero int64
+			dst.InterimUpdateInterval = &zero
+		}
 	}
 
 	return nil
 }
 
 type RADIUSProfileAcctServers struct {
-	IP      string `json:"ip,omitempty"`   // ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$
-	Port    *int64 `json:"port,omitempty"` // ^([1-9][0-9]{0,3}|[1-5][0-9]{4}|[6][0-4][0-9]{3}|[6][5][0-4][0-9]{2}|[6][5][5][0-2][0-9]|[6][5][5][3][0-5])$|^$
-	XSecret string `json:"x_secret,omitempty"`
+	IP     string `json:"ip,omitempty"`   // ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$
+	Port   *int64 `json:"port,omitempty"` // ^([1-9][0-9]{0,3}|[1-5][0-9]{4}|[6][0-4][0-9]{3}|[6][5][0-4][0-9]{2}|[6][5][5][0-2][0-9]|[6][5][5][3][0-5])$|^$
+	Secret string `json:"x_secret,omitempty"`
 }
 
 func (dst *RADIUSProfileAcctServers) UnmarshalJSON(b []byte) error {
 	type Alias RADIUSProfileAcctServers
 	aux := &struct {
+		Port *types.Number `json:"port"`
+
 		*Alias
 	}{
 		Alias: (*Alias)(dst),
@@ -85,20 +97,30 @@ func (dst *RADIUSProfileAcctServers) UnmarshalJSON(b []byte) error {
 	err := json.Unmarshal(b, &aux)
 	if err != nil {
 		return fmt.Errorf("unable to unmarshal alias: %w", err)
+	}
+	if aux.Port != nil {
+		if val, err := aux.Port.Int64(); err == nil {
+			dst.Port = &val
+		} else if string(*aux.Port) == "" {
+			var zero int64
+			dst.Port = &zero
+		}
 	}
 
 	return nil
 }
 
 type RADIUSProfileAuthServers struct {
-	IP      string `json:"ip,omitempty"`   // ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$
-	Port    *int64 `json:"port,omitempty"` // ^([1-9][0-9]{0,3}|[1-5][0-9]{4}|[6][0-4][0-9]{3}|[6][5][0-4][0-9]{2}|[6][5][5][0-2][0-9]|[6][5][5][3][0-5])$|^$
-	XSecret string `json:"x_secret,omitempty"`
+	IP     string `json:"ip,omitempty"`   // ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$
+	Port   *int64 `json:"port,omitempty"` // ^([1-9][0-9]{0,3}|[1-5][0-9]{4}|[6][0-4][0-9]{3}|[6][5][0-4][0-9]{2}|[6][5][5][0-2][0-9]|[6][5][5][3][0-5])$|^$
+	Secret string `json:"x_secret,omitempty"`
 }
 
 func (dst *RADIUSProfileAuthServers) UnmarshalJSON(b []byte) error {
 	type Alias RADIUSProfileAuthServers
 	aux := &struct {
+		Port *types.Number `json:"port"`
+
 		*Alias
 	}{
 		Alias: (*Alias)(dst),
@@ -108,17 +130,25 @@ func (dst *RADIUSProfileAuthServers) UnmarshalJSON(b []byte) error {
 	if err != nil {
 		return fmt.Errorf("unable to unmarshal alias: %w", err)
 	}
+	if aux.Port != nil {
+		if val, err := aux.Port.Int64(); err == nil {
+			dst.Port = &val
+		} else if string(*aux.Port) == "" {
+			var zero int64
+			dst.Port = &zero
+		}
+	}
 
 	return nil
 }
 
-type RADIUSProfileXCaCrts struct {
+type RADIUSProfileCaCrts struct {
+	CaCrt    string `json:"x_ca_crt,omitempty"`
 	Filename string `json:"filename,omitempty"`
-	XCaCrt   string `json:"x_ca_crt,omitempty"`
 }
 
-func (dst *RADIUSProfileXCaCrts) UnmarshalJSON(b []byte) error {
-	type Alias RADIUSProfileXCaCrts
+func (dst *RADIUSProfileCaCrts) UnmarshalJSON(b []byte) error {
+	type Alias RADIUSProfileCaCrts
 	aux := &struct {
 		*Alias
 	}{

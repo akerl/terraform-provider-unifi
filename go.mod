@@ -359,3 +359,5 @@ require (
 	mvdan.cc/unparam v0.0.0-20240528143540-8a5130ca722f // indirect
 	tags.cncf.io/container-device-interface v1.1.0 // indirect
 )
+
+replace github.com/ubiquiti-community/go-unifi => github.com/akerl/go-unifi v0.0.0-20260316031309-c708955c8543

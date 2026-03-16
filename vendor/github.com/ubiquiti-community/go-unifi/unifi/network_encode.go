@@ -214,12 +214,18 @@ func (n *Network) marshalVLANOnly() ([]byte, error) {
 		NoDelete bool   `json:"attr_no_delete,omitempty"`
 		NoEdit   bool   `json:"attr_no_edit,omitempty"`
 
-		Name         *string `json:"name,omitempty"`
-		Purpose      string  `json:"purpose"`
-		Enabled      bool    `json:"enabled"`
-		NetworkGroup *string `json:"networkgroup,omitempty"`
-		VLAN         *int64  `json:"vlan,omitempty"`
-		VLANEnabled  bool    `json:"vlan_enabled"`
+		Name                    *string `json:"name,omitempty"`
+		Purpose                 string  `json:"purpose"`
+		Enabled                 bool    `json:"enabled"`
+		NetworkGroup            *string `json:"networkgroup,omitempty"`
+		VLAN                    *int64  `json:"vlan,omitempty"`
+		VLANEnabled             bool    `json:"vlan_enabled"`
+		IGMPSnooping            bool    `json:"igmp_snooping"`
+		NetworkIsolationEnabled bool    `json:"network_isolation_enabled"`
+		DHCPguardEnabled        bool    `json:"dhcpguard_enabled"`
+		DHCPDIP1                string  `json:"dhcpd_ip_1"`
+		DHCPDIP2                string  `json:"dhcpd_ip_2"`
+		DHCPDIP3                string  `json:"dhcpd_ip_3"`
 	}{
 		ID:       n.ID,
 		SiteID:   n.SiteID,
@@ -228,12 +234,18 @@ func (n *Network) marshalVLANOnly() ([]byte, error) {
 		NoDelete: n.NoDelete,
 		NoEdit:   n.NoEdit,
 
-		Name:         n.Name,
-		Purpose:      n.Purpose,
-		Enabled:      enabled,
-		NetworkGroup: valueOrDefault(n.NetworkGroup, "LAN"),
-		VLAN:         n.VLAN,
-		VLANEnabled:  vlanEnabled,
+		Name:                    n.Name,
+		Purpose:                 n.Purpose,
+		Enabled:                 enabled,
+		NetworkGroup:            valueOrDefault(n.NetworkGroup, "LAN"),
+		VLAN:                    n.VLAN,
+		VLANEnabled:             vlanEnabled,
+		IGMPSnooping:            n.IGMPSnooping,
+		NetworkIsolationEnabled: n.NetworkIsolationEnabled,
+		DHCPguardEnabled:        n.DHCPguardEnabled,
+		DHCPDIP1:                n.DHCPDIP1,
+		DHCPDIP2:                n.DHCPDIP2,
+		DHCPDIP3:                n.DHCPDIP3,
 	})
 }
 
@@ -407,18 +419,63 @@ func (n *Network) marshalWAN() ([]byte, error) {
 		Purpose string  `json:"purpose"`
 		Enabled bool    `json:"enabled"`
 
-		// WAN-specific fields
-		WANType             *string                 `json:"wan_type,omitempty"`
-		WANNetworkGroup     *string                 `json:"wan_networkgroup,omitempty"`
-		WANVLANEnabled      bool                    `json:"wan_vlan_enabled"`
-		WANVLAN             *int64                  `json:"wan_vlan,omitempty"`
-		WANFailoverPriority *int64                  `json:"wan_failover_priority,omitempty"`
-		ReportWANEvent      bool                    `json:"report_wan_event"`
-		IGMPProxyUpstream   bool                    `json:"igmp_proxy_upstream"`
-		WANDHCPv6PDSizeAuto bool                    `json:"wan_dhcpv6_pd_size_auto"`
-		WANIPAliases        []string                `json:"wan_ip_aliases"`
-		WANDHCPOptions      []NetworkWANDHCPOptions `json:"wan_dhcp_options"`
-		IPV6Enabled         bool                    `json:"ipv6_enabled"`
+		// WAN type fields
+		WANType         *string `json:"wan_type,omitempty"`
+		WANTypeV6       *string `json:"wan_type_v6,omitempty"`
+		WANNetworkGroup *string `json:"wan_networkgroup,omitempty"`
+
+		// VLAN fields
+		WANVLANEnabled bool   `json:"wan_vlan_enabled"`
+		WANVLAN        *int64 `json:"wan_vlan,omitempty"`
+
+		// DHCP CoS fields
+		WANDHCPCos   *int64 `json:"wan_dhcp_cos,omitempty"`
+		WANDHCPv6Cos *int64 `json:"wan_dhcpv6_cos,omitempty"`
+
+		// DNS fields
+		WANDNS1              *string `json:"wan_dns1,omitempty"`
+		WANDNS2              *string `json:"wan_dns2,omitempty"`
+		WANDNSPreference     *string `json:"wan_dns_preference,omitempty"`
+		WANIPV6DNS1          *string `json:"wan_ipv6_dns1,omitempty"`
+		WANIPV6DNS2          *string `json:"wan_ipv6_dns2,omitempty"`
+		WANIPV6DNSPreference *string `json:"wan_ipv6_dns_preference,omitempty"`
+
+		// DHCPv6 / IPv6 fields
+		WANDHCPv6PDSize       *int64                    `json:"wan_dhcpv6_pd_size,omitempty"`
+		WANDHCPv6PDSizeAuto   bool                      `json:"wan_dhcpv6_pd_size_auto"`
+		WANDHCPv6Options      []NetworkWANDHCPv6Options `json:"wan_dhcpv6_options,omitempty"`
+		IPV6WANDelegationType *string                   `json:"ipv6_wan_delegation_type,omitempty"`
+		IPV6Enabled           bool                      `json:"ipv6_enabled"`
+
+		// QoS fields
+		WANEgressQOSEnabled *bool  `json:"wan_egress_qos_enabled,omitempty"`
+		WANEgressQOS        *int64 `json:"wan_egress_qos,omitempty"`
+		WANSmartQEnabled    bool   `json:"wan_smartq_enabled"`
+		WANSmartQUpRate     *int64 `json:"wan_smartq_up_rate,omitempty"`
+		WANSmartQDownRate   *int64 `json:"wan_smartq_down_rate,omitempty"`
+
+		// UPnP fields
+		UPnPEnabled       *bool   `json:"upnp_enabled,omitempty"`
+		UPnPWANInterface  *string `json:"upnp_wan_interface,omitempty"`
+		UPnPNatPMPEnabled *bool   `json:"upnp_nat_pmp_enabled,omitempty"`
+		UPnPSecureMode    *bool   `json:"upnp_secure_mode,omitempty"`
+
+		// Load balance / failover fields
+		WANLoadBalanceType   *string `json:"wan_load_balance_type,omitempty"`
+		WANLoadBalanceWeight *int64  `json:"wan_load_balance_weight,omitempty"`
+		WANFailoverPriority  *int64  `json:"wan_failover_priority,omitempty"`
+
+		// IGMP fields
+		IGMPProxyFor      *string `json:"igmp_proxy_for,omitempty"`
+		IGMPProxyUpstream bool    `json:"igmp_proxy_upstream"`
+
+		// Event / alias fields
+		ReportWANEvent bool                    `json:"report_wan_event"`
+		WANIPAliases   []string                `json:"wan_ip_aliases"`
+		WANDHCPOptions []NetworkWANDHCPOptions `json:"wan_dhcp_options"`
+
+		// Provider capabilities
+		WANProviderCapabilities *NetworkWANProviderCapabilities `json:"wan_provider_capabilities,omitempty"`
 	}{
 		ID:       n.ID,
 		SiteID:   n.SiteID,
@@ -431,18 +488,63 @@ func (n *Network) marshalWAN() ([]byte, error) {
 		Purpose: n.Purpose,
 		Enabled: n.Enabled,
 
-		// WAN fields
-		WANType:             n.WANType,
-		WANNetworkGroup:     n.WANNetworkGroup,
-		WANVLANEnabled:      n.WANVLANEnabled,
-		WANVLAN:             n.WANVLAN,
-		WANFailoverPriority: n.WANFailoverPriority,
-		ReportWANEvent:      n.ReportWANEvent,
-		IGMPProxyUpstream:   n.IGMPProxyUpstream,
-		WANDHCPv6PDSizeAuto: n.WANDHCPv6PDSizeAuto,
-		WANIPAliases:        orEmptySlice(n.WANIPAliases),
-		WANDHCPOptions:      orEmptyWANDHCPOptions(n.WANDHCPOptions),
-		IPV6Enabled:         true, // Default to true for WAN
+		// WAN type fields
+		WANType:         n.WANType,
+		WANTypeV6:       n.WANTypeV6,
+		WANNetworkGroup: n.WANNetworkGroup,
+
+		// VLAN fields
+		WANVLANEnabled: n.WANVLANEnabled,
+		WANVLAN:        n.WANVLAN,
+
+		// DHCP CoS fields
+		WANDHCPCos:   n.WANDHCPCos,
+		WANDHCPv6Cos: n.WANDHCPv6Cos,
+
+		// DNS fields
+		WANDNS1:              n.WANDNS1,
+		WANDNS2:              n.WANDNS2,
+		WANDNSPreference:     n.WANDNSPreference,
+		WANIPV6DNS1:          n.WANIPV6DNS1,
+		WANIPV6DNS2:          n.WANIPV6DNS2,
+		WANIPV6DNSPreference: n.WANIPV6DNSPreference,
+
+		// DHCPv6 / IPv6 fields
+		WANDHCPv6PDSize:       n.WANDHCPv6PDSize,
+		WANDHCPv6PDSizeAuto:   n.WANDHCPv6PDSizeAuto,
+		WANDHCPv6Options:      n.WANDHCPv6Options,
+		IPV6WANDelegationType: n.IPV6WANDelegationType,
+		IPV6Enabled:           n.WANTypeV6 != nil && *n.WANTypeV6 != "disabled",
+
+		// QoS fields
+		WANEgressQOSEnabled: n.WANEgressQOSEnabled,
+		WANEgressQOS:        n.WANEgressQOS,
+		WANSmartQEnabled:    n.WANSmartQEnabled,
+		WANSmartQUpRate:     n.WANSmartQUpRate,
+		WANSmartQDownRate:   n.WANSmartQDownRate,
+
+		// UPnP fields
+		UPnPEnabled:       n.UPnPEnabled,
+		UPnPWANInterface:  n.UPnPWANInterface,
+		UPnPNatPMPEnabled: n.UPnPNatPMPEnabled,
+		UPnPSecureMode:    n.UPnPSecureMode,
+
+		// Load balance / failover fields
+		WANLoadBalanceType:   n.WANLoadBalanceType,
+		WANLoadBalanceWeight: n.WANLoadBalanceWeight,
+		WANFailoverPriority:  n.WANFailoverPriority,
+
+		// IGMP fields
+		IGMPProxyFor:      n.IGMPProxyFor,
+		IGMPProxyUpstream: n.IGMPProxyUpstream,
+
+		// Event / alias fields
+		ReportWANEvent: n.ReportWANEvent,
+		WANIPAliases:   orEmptySlice(n.WANIPAliases),
+		WANDHCPOptions: orEmptyWANDHCPOptions(n.WANDHCPOptions),
+
+		// Provider capabilities
+		WANProviderCapabilities: n.WANProviderCapabilities,
 	})
 }
 
@@ -558,9 +660,56 @@ func (n *Network) marshalUserVPN() ([]byte, error) {
 		NoDelete bool   `json:"attr_no_delete,omitempty"`
 		NoEdit   bool   `json:"attr_no_edit,omitempty"`
 
-		Name    *string `json:"name,omitempty"`
-		Purpose string  `json:"purpose"`
-		Enabled bool    `json:"enabled"`
+		Name              *string `json:"name,omitempty"`
+		Purpose           string  `json:"purpose"`
+		Enabled           bool    `json:"enabled"`
+		SettingPreference *string `json:"setting_preference,omitempty"`
+		IPSubnet          *string `json:"ip_subnet,omitempty"`
+
+		// VPN Type
+		VPNType *string `json:"vpn_type,omitempty"`
+
+		// DNS
+		DHCPDDNS1       string `json:"dhcpd_dns_1,omitempty"`
+		DHCPDDNS2       string `json:"dhcpd_dns_2,omitempty"`
+		DHCPDDNSEnabled bool   `json:"dhcpd_dns_enabled"`
+
+		// DHCP Range
+		DHCPDStart *string `json:"dhcpd_start,omitempty"`
+		DHCPDStop  *string `json:"dhcpd_stop,omitempty"`
+
+		// RADIUS
+		RADIUSProfileID *string `json:"radiusprofile_id,omitempty"`
+
+		// WireGuard Server Configuration
+		WireguardInterface                     *string `json:"wireguard_interface,omitempty"`
+		WireguardPrivateKey                    *string `json:"x_wireguard_private_key,omitempty"`
+		WireguardLocalWANIP                    *string `json:"wireguard_local_wan_ip,omitempty"`
+		LocalPort                              *int64  `json:"local_port,omitempty"`
+		WireguardInterfaceBindingModeIPVersion *string `json:"wireguard_interface_binding_mode_ip_version,omitempty"`
+		VPNClientConfigurationRemoteIPOverride *string `json:"vpn_client_configuration_remote_ip_override,omitempty"`
+
+		// L2TP Server Configuration
+		L2TpInterface        *string `json:"l2tp_interface,omitempty"`
+		L2TpLocalWANIP       *string `json:"l2tp_local_wan_ip,omitempty"`
+		L2TpAllowWeakCiphers bool    `json:"l2tp_allow_weak_ciphers"`
+		IPSecPreSharedKey    *string `json:"x_ipsec_pre_shared_key,omitempty"`
+
+		// OpenVPN Server Configuration
+		OpenVPNInterface        *string `json:"openvpn_interface,omitempty"`
+		OpenVPNLocalWANIP       *string `json:"openvpn_local_wan_ip,omitempty"`
+		OpenVPNMode             *string `json:"openvpn_mode,omitempty"`
+		OpenVPNEncryptionCipher *string `json:"openvpn_encryption_cipher,omitempty"`
+
+		// OpenVPN Certificates and Keys
+		ServerCrt       *string `json:"x_server_crt,omitempty"`
+		ServerKey       *string `json:"x_server_key,omitempty"`
+		DhKey           *string `json:"x_dh_key,omitempty"`
+		SharedClientKey *string `json:"x_shared_client_key,omitempty"`
+		SharedClientCrt *string `json:"x_shared_client_crt,omitempty"`
+		AuthKey         *string `json:"x_auth_key,omitempty"`
+		CaCrt           *string `json:"x_ca_crt,omitempty"`
+		CaKey           *string `json:"x_ca_key,omitempty"`
 	}{
 		ID:       n.ID,
 		SiteID:   n.SiteID,
@@ -569,9 +718,56 @@ func (n *Network) marshalUserVPN() ([]byte, error) {
 		NoDelete: n.NoDelete,
 		NoEdit:   n.NoEdit,
 
-		Name:    n.Name,
-		Purpose: n.Purpose,
-		Enabled: n.Enabled,
+		Name:              n.Name,
+		Purpose:           n.Purpose,
+		Enabled:           n.Enabled,
+		SettingPreference: n.SettingPreference,
+		IPSubnet:          n.IPSubnet,
+
+		// VPN Type
+		VPNType: n.VPNType,
+
+		// DNS
+		DHCPDDNS1:       n.DHCPDDNS1,
+		DHCPDDNS2:       n.DHCPDDNS2,
+		DHCPDDNSEnabled: n.DHCPDDNSEnabled,
+
+		// DHCP Range
+		DHCPDStart: n.DHCPDStart,
+		DHCPDStop:  n.DHCPDStop,
+
+		// RADIUS
+		RADIUSProfileID: n.RADIUSProfileID,
+
+		// WireGuard Server Configuration
+		WireguardInterface:                     n.WireguardInterface,
+		WireguardPrivateKey:                    n.WireguardPrivateKey,
+		WireguardLocalWANIP:                    n.WireguardLocalWANIP,
+		LocalPort:                              n.LocalPort,
+		WireguardInterfaceBindingModeIPVersion: n.WireguardInterfaceBindingModeIPVersion,
+		VPNClientConfigurationRemoteIPOverride: n.VPNClientConfigurationRemoteIPOverride,
+
+		// L2TP Server Configuration
+		L2TpInterface:        n.L2TpInterface,
+		L2TpLocalWANIP:       n.L2TpLocalWANIP,
+		L2TpAllowWeakCiphers: n.L2TpAllowWeakCiphers,
+		IPSecPreSharedKey:    n.IPSecPreSharedKey,
+
+		// OpenVPN Server Configuration
+		OpenVPNInterface:        n.OpenVPNInterface,
+		OpenVPNLocalWANIP:       n.OpenVPNLocalWANIP,
+		OpenVPNMode:             n.OpenVPNMode,
+		OpenVPNEncryptionCipher: n.OpenVPNEncryptionCipher,
+
+		// OpenVPN Certificates and Keys
+		ServerCrt:       n.ServerCrt,
+		ServerKey:       n.ServerKey,
+		DhKey:           n.DhKey,
+		SharedClientKey: n.SharedClientKey,
+		SharedClientCrt: n.SharedClientCrt,
+		AuthKey:         n.AuthKey,
+		CaCrt:           n.CaCrt,
+		CaKey:           n.CaKey,
 	})
 }
 

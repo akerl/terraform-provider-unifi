@@ -30,13 +30,17 @@ type Radius struct {
 	ConfigureWholeNetwork bool   `json:"configure_whole_network"`
 	Enabled               bool   `json:"enabled"`
 	InterimUpdateInterval *int64 `json:"interim_update_interval,omitempty"` // ^([6-9][0-9]|[1-9][0-9]{2,3}|[1-7][0-9]{4}|8[0-5][0-9]{3}|86[0-3][0-9][0-9]|86400)$
+	Secret                string `json:"x_secret,omitempty"`                // ^[^\\"' ]{1,48}$
 	TunneledReply         bool   `json:"tunneled_reply"`
-	XSecret               string `json:"x_secret,omitempty"` // ^[^\\"' ]{1,48}$
 }
 
 func (dst *Radius) UnmarshalJSON(b []byte) error {
 	type Alias Radius
 	aux := &struct {
+		AcctPort              *types.Number `json:"acct_port"`
+		AuthPort              *types.Number `json:"auth_port"`
+		InterimUpdateInterval *types.Number `json:"interim_update_interval"`
+
 		*Alias
 	}{
 		Alias: (*Alias)(dst),
@@ -50,6 +54,30 @@ func (dst *Radius) UnmarshalJSON(b []byte) error {
 	err := json.Unmarshal(b, &aux)
 	if err != nil {
 		return fmt.Errorf("unable to unmarshal alias: %w", err)
+	}
+	if aux.AcctPort != nil {
+		if val, err := aux.AcctPort.Int64(); err == nil {
+			dst.AcctPort = &val
+		} else if string(*aux.AcctPort) == "" {
+			var zero int64
+			dst.AcctPort = &zero
+		}
+	}
+	if aux.AuthPort != nil {
+		if val, err := aux.AuthPort.Int64(); err == nil {
+			dst.AuthPort = &val
+		} else if string(*aux.AuthPort) == "" {
+			var zero int64
+			dst.AuthPort = &zero
+		}
+	}
+	if aux.InterimUpdateInterval != nil {
+		if val, err := aux.InterimUpdateInterval.Int64(); err == nil {
+			dst.InterimUpdateInterval = &val
+		} else if string(*aux.InterimUpdateInterval) == "" {
+			var zero int64
+			dst.InterimUpdateInterval = &zero
+		}
 	}
 
 	return nil
