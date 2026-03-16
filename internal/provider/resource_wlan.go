@@ -307,6 +307,8 @@ func resourceWLANGetResourceData(d *schema.ResourceData, meta interface{}) (*uni
 		minrateSettingPreference = "manual"
 	}
 
+	groupRekey := int64(3600)
+
 	return &unifi.WLAN{
 		Name:                    d.Get("name").(string),
 		XPassphrase:             passphrase,
@@ -334,7 +336,7 @@ func resourceWLANGetResourceData(d *schema.ResourceData, meta interface{}) (*uni
 		Enabled:            true,
 		NameCombineEnabled: true,
 
-		GroupRekey:         3600,
+		GroupRekey:         &groupRekey,
 		DTIMMode:           "default",
 		No2GhzOui:          d.Get("no2ghz_oui").(bool),
 		L2Isolation:        d.Get("l2_isolation").(bool),
@@ -346,10 +348,10 @@ func resourceWLANGetResourceData(d *schema.ResourceData, meta interface{}) (*uni
 		MinrateSettingPreference: minrateSettingPreference,
 
 		MinrateNgEnabled:      d.Get("minimum_data_rate_2g_kbps").(int) != 0,
-		MinrateNgDataRateKbps: d.Get("minimum_data_rate_2g_kbps").(int),
+		MinrateNgDataRateKbps: i64ptr(d.Get("minimum_data_rate_2g_kbps").(int64)),
 
 		MinrateNaEnabled:      d.Get("minimum_data_rate_5g_kbps").(int) != 0,
-		MinrateNaDataRateKbps: d.Get("minimum_data_rate_5g_kbps").(int),
+		MinrateNaDataRateKbps: i64ptr(d.Get("minimum_data_rate_5g_kbps").(int64)),
 	}, nil
 }
 
@@ -529,9 +531,9 @@ func toSchedule(data map[string]interface{}) unifi.WLANScheduleWithDuration {
 
 	return unifi.WLANScheduleWithDuration{
 		StartDaysOfWeek: []string{dow},
-		StartHour:       startHour,
-		StartMinute:     startMinute,
-		DurationMinutes: duration,
+		StartHour:       i64ptr(int64(startHour)),
+		StartMinute:     i64ptr(int64(startMinute)),
+		DurationMinutes: i64ptr(int64(duration)),
 		Name:            name,
 	}
 }

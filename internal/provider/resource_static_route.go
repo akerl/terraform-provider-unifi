@@ -107,7 +107,7 @@ func resourceStaticRouteGetResourceData(d *schema.ResourceData) (*unifi.Routing,
 
 		Name:                d.Get("name").(string),
 		StaticRouteNetwork:  cidrZeroBased(d.Get("network").(string)),
-		StaticRouteDistance: d.Get("distance").(int),
+		StaticRouteDistance: i64ptr(d.Get("distance").(int64)),
 		StaticRouteType:     t,
 	}
 
