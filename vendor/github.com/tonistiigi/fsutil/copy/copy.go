@@ -18,6 +18,8 @@ import (
 	"github.com/tonistiigi/fsutil"
 )
 
+const defaultDirectoryMode = 0755
+
 var bufferPool = &sync.Pool{
 	New: func() interface{} {
 		buffer := make([]byte, 32*1024)
@@ -80,7 +82,11 @@ func Copy(ctx context.Context, srcRoot, src, dstRoot, dst string, opts ...Opt) e
 		if err != nil {
 			return err
 		}
-		if createdDirs, err := MkdirAll(ensureDstPath, 0755, ci.Chown, ci.Utime); err != nil {
+		perm := defaultDirectoryMode
+		if ci.Mode != nil {
+			perm = *ci.Mode
+		}
+		if createdDirs, err := MkdirAll(ensureDstPath, os.FileMode(perm), ci.Chown, ci.Utime); err != nil {
 			return err
 		} else {
 			defer fixCreatedParentDirs(createdDirs, ci.Utime)
@@ -105,6 +111,7 @@ func Copy(ctx context.Context, srcRoot, src, dstRoot, dst string, opts ...Opt) e
 	if err != nil {
 		return err
 	}
+	c.testHookLstat = ci.testHookLstat
 	srcs := []string{src}
 
 	if ci.AllowWildcards {
@@ -159,7 +166,11 @@ func (c *copier) prepareTargetDir(srcFollowed, src, destPath string, copyDirCont
 		target = destPath
 	}
 	var createdDirs []string
-	if dirs, err := MkdirAll(target, 0755, c.chown, c.utime); err != nil {
+	mode := defaultDirectoryMode
+	if c.mode != nil {
+		mode = *c.mode
+	}
+	if dirs, err := MkdirAll(target, os.FileMode(mode), c.chown, c.utime); err != nil {
 		return "", nil, err
 	} else {
 		createdDirs = dirs
@@ -196,6 +207,9 @@ type CopyInfo struct {
 	// replace any existing symlink or file)
 	AlwaysReplaceExistingDestPaths bool
 	ChangeFunc                     fsutil.ChangeFunc
+
+	// testHookLstat is called before each os.Lstat if non-nil (for testing only)
+	testHookLstat func(path string)
 }
 
 type Opt func(*CopyInfo)
@@ -262,6 +276,7 @@ type copier struct {
 	changefn                       fsutil.ChangeFunc
 	root                           string
 	alwaysReplaceExistingDestPaths bool
+	testHookLstat                  func(string)
 }
 
 type parentDir struct {
@@ -307,6 +322,7 @@ func newCopier(root string, chown Chowner, tm *time.Time, mode *int, modeSet *mo
 		excludePatternMatcher:          excludePatternMatcher,
 		changefn:                       changeFunc,
 		alwaysReplaceExistingDestPaths: alwaysReplaceExistingDestPaths,
+		testHookLstat:                  nil,
 	}, nil
 }
 
@@ -318,16 +334,10 @@ func (c *copier) copy(ctx context.Context, src, srcComponents, target string, ov
 	default:
 	}
 
-	fi, err := os.Lstat(src)
-	if err != nil {
-		return errors.Wrapf(err, "failed to stat %s", src)
-	}
-	targetFi, err := os.Lstat(target)
-	if err != nil && !os.IsNotExist(err) {
-		return errors.Wrapf(err, "failed to stat %s", src)
-	}
-
+	// Check exclude patterns BEFORE calling os.Lstat to avoid permission errors
+	// on inaccessible files/directories (e.g., protected Windows system folders)
 	include := true
+	excluded := false
 	var (
 		includeMatchInfo patternmatcher.MatchInfo
 		excludeMatchInfo patternmatcher.MatchInfo
@@ -335,27 +345,61 @@ func (c *copier) copy(ctx context.Context, src, srcComponents, target string, ov
 	if srcComponents != "" {
 		matchesIncludePattern := false
 		matchesExcludePattern := false
-		matchesIncludePattern, includeMatchInfo, err = c.include(srcComponents, fi, parentIncludeMatchInfo)
+		var err error
+		matchesIncludePattern, includeMatchInfo, err = c.include(srcComponents, parentIncludeMatchInfo)
 		if err != nil {
 			return err
 		}
 		include = matchesIncludePattern
 
-		matchesExcludePattern, excludeMatchInfo, err = c.exclude(srcComponents, fi, parentExcludeMatchInfo)
+		matchesExcludePattern, excludeMatchInfo, err = c.exclude(srcComponents, parentExcludeMatchInfo)
 		if err != nil {
 			return err
 		}
 		if matchesExcludePattern {
 			include = false
+			excluded = true
+		}
+
+		// Optimization: Skip os.Lstat() for excluded paths when safe to do so.
+		// We can skip Lstat if:
+		// 1. The path is explicitly excluded
+		// 2. There are no include patterns (no need to check children)
+		// 3. There are no negation patterns in excludes (no exceptions to exclusions)
+		//
+		// This prevents "Access is denied" errors on Windows protected folders
+		// like "System Volume Information" and "WcSandboxState".
+		canSkip := !include && c.includePatternMatcher == nil &&
+			(c.excludePatternMatcher == nil || !c.excludePatternMatcher.Exclusions())
+		if canSkip {
+			return nil
 		}
 	}
 
+	if c.testHookLstat != nil {
+		c.testHookLstat(src)
+	}
+	fi, err := os.Lstat(src)
+	if err != nil {
+		return errors.Wrapf(err, "failed to stat %s", src)
+	}
+
+	// After Lstat, if this item is excluded and is NOT a directory, skip it
+	if !include && !fi.IsDir() {
+		return nil
+	}
+
+	targetFi, err := os.Lstat(target)
+	if err != nil && !os.IsNotExist(err) {
+		return errors.Wrapf(err, "failed to stat %s", target)
+	}
+
 	if include {
-		if err := c.removeTargetIfNeeded(src, target, fi, targetFi); err != nil {
+		if err := c.removeTargetIfNeeded(target, fi, targetFi); err != nil {
 			return err
 		}
 
-		if err := c.createParentDirs(src, srcComponents, target, overwriteTargetMetadata); err != nil {
+		if err := c.createParentDirs(src, overwriteTargetMetadata); err != nil {
 			return err
 		}
 	}
@@ -378,7 +422,7 @@ func (c *copier) copy(ctx context.Context, src, srcComponents, target string, ov
 	case fi.IsDir():
 		if created, err := c.copyDirectory(
 			ctx, src, srcComponents, target, fi, overwriteTargetMetadata,
-			include, includeMatchInfo, excludeMatchInfo,
+			include, excluded, includeMatchInfo, excludeMatchInfo,
 		); err != nil {
 			return err
 		} else if !overwriteTargetMetadata {
@@ -447,7 +491,7 @@ func (c *copier) notifyChange(target string, fi os.FileInfo) error {
 	return nil
 }
 
-func (c *copier) include(path string, fi os.FileInfo, parentIncludeMatchInfo patternmatcher.MatchInfo) (bool, patternmatcher.MatchInfo, error) {
+func (c *copier) include(path string, parentIncludeMatchInfo patternmatcher.MatchInfo) (bool, patternmatcher.MatchInfo, error) {
 	if c.includePatternMatcher == nil {
 		return true, patternmatcher.MatchInfo{}, nil
 	}
@@ -459,7 +503,7 @@ func (c *copier) include(path string, fi os.FileInfo, parentIncludeMatchInfo pat
 	return m, matchInfo, nil
 }
 
-func (c *copier) exclude(path string, fi os.FileInfo, parentExcludeMatchInfo patternmatcher.MatchInfo) (bool, patternmatcher.MatchInfo, error) {
+func (c *copier) exclude(path string, parentExcludeMatchInfo patternmatcher.MatchInfo) (bool, patternmatcher.MatchInfo, error) {
 	if c.excludePatternMatcher == nil {
 		return false, patternmatcher.MatchInfo{}, nil
 	}
@@ -471,7 +515,7 @@ func (c *copier) exclude(path string, fi os.FileInfo, parentExcludeMatchInfo pat
 	return m, matchInfo, nil
 }
 
-func (c *copier) removeTargetIfNeeded(src, target string, srcFi, targetFi os.FileInfo) error {
+func (c *copier) removeTargetIfNeeded(target string, srcFi, targetFi os.FileInfo) error {
 	if !c.alwaysReplaceExistingDestPaths {
 		return nil
 	}
@@ -488,7 +532,7 @@ func (c *copier) removeTargetIfNeeded(src, target string, srcFi, targetFi os.Fil
 
 // Delayed creation of parent directories when a file or dir matches an include
 // pattern.
-func (c *copier) createParentDirs(src, srcComponents, target string, overwriteTargetMetadata bool) error {
+func (c *copier) createParentDirs(src string, overwriteTargetMetadata bool) error {
 	for i, parentDir := range c.parentDirs {
 		if parentDir.copied {
 			continue
@@ -502,7 +546,7 @@ func (c *copier) createParentDirs(src, srcComponents, target string, overwriteTa
 			return errors.Errorf("%s is not a directory", parentDir.srcPath)
 		}
 
-		created, err := copyDirectoryOnly(parentDir.srcPath, parentDir.dstPath, fi, overwriteTargetMetadata)
+		created, err := copyDirectoryOnly(parentDir.dstPath, fi, overwriteTargetMetadata)
 		if err != nil {
 			return err
 		}
@@ -529,6 +573,7 @@ func (c *copier) copyDirectory(
 	stat os.FileInfo,
 	overwriteTargetMetadata bool,
 	include bool,
+	excluded bool,
 	includeMatchInfo patternmatcher.MatchInfo,
 	excludeMatchInfo patternmatcher.MatchInfo,
 ) (bool, error) {
@@ -549,7 +594,7 @@ func (c *copier) copyDirectory(
 	// encounter a/b/c.
 	if include {
 		var err error
-		created, err = copyDirectoryOnly(src, dst, stat, overwriteTargetMetadata)
+		created, err = copyDirectoryOnly(dst, stat, overwriteTargetMetadata)
 		if err != nil {
 			return created, err
 		}
@@ -566,6 +611,13 @@ func (c *copier) copyDirectory(
 	defer func() {
 		c.parentDirs = c.parentDirs[:len(c.parentDirs)-1]
 	}()
+
+	// Skip reading directory contents if explicitly excluded AND no negation patterns exist.
+	// If negation patterns exist (e.g., "!bar/baz"), we must traverse excluded directories
+	// to find children that might be un-excluded by the negation.
+	if excluded && (c.excludePatternMatcher == nil || !c.excludePatternMatcher.Exclusions()) {
+		return false, nil
+	}
 
 	fis, err := os.ReadDir(src)
 	if err != nil {
@@ -586,7 +638,7 @@ func (c *copier) copyDirectory(
 	return created, nil
 }
 
-func copyDirectoryOnly(src, dst string, stat os.FileInfo, overwriteTargetMetadata bool) (bool, error) {
+func copyDirectoryOnly(dst string, stat os.FileInfo, overwriteTargetMetadata bool) (bool, error) {
 	if st, err := os.Lstat(dst); err != nil {
 		if !os.IsNotExist(err) {
 			return false, err

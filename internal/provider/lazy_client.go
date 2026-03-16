@@ -2,17 +2,10 @@ package provider
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"log"
-	"net"
-	"net/http"
-	"net/http/cookiejar"
 	"sync"
-	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
-	"github.com/paultyng/go-unifi/unifi"
+	"github.com/ubiquiti-community/go-unifi/unifi"
 )
 
 type lazyClient struct {
@@ -23,55 +16,20 @@ type lazyClient struct {
 	subsystem string
 
 	once  sync.Once
-	inner *unifi.Client
-}
-
-func setHTTPClient(c *unifi.Client, insecure bool, subsystem string) {
-	httpClient := &http.Client{}
-	httpClient.Transport = &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-			DualStack: true,
-		}).DialContext,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: insecure,
-		},
-	}
-
-	httpClient.Transport = logging.NewSubsystemLoggingHTTPTransport(subsystem, httpClient.Transport)
-
-	jar, _ := cookiejar.New(nil)
-	httpClient.Jar = jar
-
-	c.SetHTTPClient(httpClient)
+	inner *unifi.ApiClient
 }
 
 var initErr error
 
 func (c *lazyClient) init(ctx context.Context) error {
 	c.once.Do(func() {
-		c.inner = &unifi.Client{}
-		setHTTPClient(c.inner, c.insecure, c.subsystem)
-
-		initErr = c.inner.SetBaseURL(c.baseURL)
-		if initErr != nil {
-			return
+		cfg := unifi.Config{
+			BaseURL:       c.baseURL,
+			Username:      c.user,
+			Password:      c.pass,
+			AllowInsecure: c.insecure,
 		}
-
-		initErr = c.inner.Login(ctx, c.user, c.pass)
-		if initErr != nil {
-			return
-		}
-
-		initErr = checkMinimumControllerVersion(c.inner.Version())
-		log.Printf("[TRACE] Unifi controller version: %q", c.inner.Version())
+		c.inner, initErr = unifi.New(ctx, &cfg)
 	})
 	return initErr
 }
@@ -82,11 +40,11 @@ func (c *lazyClient) Version() string {
 	}
 	return c.inner.Version()
 }
-func (c *lazyClient) ListUserGroup(ctx context.Context, site string) ([]unifi.UserGroup, error) {
+func (c *lazyClient) ListClientGroup(ctx context.Context, site string) ([]unifi.ClientGroup, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.ListUserGroup(ctx, site)
+	return c.inner.ListClientGroup(ctx, site)
 }
 func (c *lazyClient) ListWLANGroup(ctx context.Context, site string) ([]unifi.WLANGroup, error) {
 	if err := c.init(ctx); err != nil {
@@ -154,29 +112,29 @@ func (c *lazyClient) UpdateWLAN(ctx context.Context, site string, d *unifi.WLAN)
 	}
 	return c.inner.UpdateWLAN(ctx, site, d)
 }
-func (c *lazyClient) DeleteUserGroup(ctx context.Context, site, id string) error {
+func (c *lazyClient) DeleteClientGroup(ctx context.Context, site, id string) error {
 	if err := c.init(ctx); err != nil {
 		return err
 	}
-	return c.inner.DeleteUserGroup(ctx, site, id)
+	return c.inner.DeleteClientGroup(ctx, site, id)
 }
-func (c *lazyClient) CreateUserGroup(ctx context.Context, site string, d *unifi.UserGroup) (*unifi.UserGroup, error) {
+func (c *lazyClient) CreateClientGroup(ctx context.Context, site string, d *unifi.ClientGroup) (*unifi.ClientGroup, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.CreateUserGroup(ctx, site, d)
+	return c.inner.CreateClientGroup(ctx, site, d)
 }
-func (c *lazyClient) GetUserGroup(ctx context.Context, site, id string) (*unifi.UserGroup, error) {
+func (c *lazyClient) GetClientGroup(ctx context.Context, site, id string) (*unifi.ClientGroup, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.GetUserGroup(ctx, site, id)
+	return c.inner.GetClientGroup(ctx, site, id)
 }
-func (c *lazyClient) UpdateUserGroup(ctx context.Context, site string, d *unifi.UserGroup) (*unifi.UserGroup, error) {
+func (c *lazyClient) UpdateClientGroup(ctx context.Context, site string, d *unifi.ClientGroup) (*unifi.ClientGroup, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.UpdateUserGroup(ctx, site, d)
+	return c.inner.UpdateClientGroup(ctx, site, d)
 }
 func (c *lazyClient) GetDevice(ctx context.Context, site, id string) (*unifi.Device, error) {
 	if err := c.init(ctx); err != nil {
@@ -226,53 +184,47 @@ func (c *lazyClient) ForgetDevice(ctx context.Context, site, mac string) error {
 	}
 	return c.inner.ForgetDevice(ctx, site, mac)
 }
-func (c *lazyClient) GetUser(ctx context.Context, site, id string) (*unifi.User, error) {
+func (c *lazyClient) GetClient(ctx context.Context, site, id string) (*unifi.Client, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.GetUser(ctx, site, id)
+	return c.inner.GetClient(ctx, site, id)
 }
-func (c *lazyClient) GetUserByMAC(ctx context.Context, site, mac string) (*unifi.User, error) {
+func (c *lazyClient) GetClientByMAC(ctx context.Context, site, mac string) (*unifi.Client, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.GetUserByMAC(ctx, site, mac)
+	return c.inner.GetClientByMAC(ctx, site, mac)
 }
-func (c *lazyClient) CreateUser(ctx context.Context, site string, d *unifi.User) (*unifi.User, error) {
+func (c *lazyClient) CreateClient(ctx context.Context, site string, d *unifi.Client) (*unifi.Client, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.CreateUser(ctx, site, d)
+	return c.inner.CreateClient(ctx, site, d)
 }
-func (c *lazyClient) UpdateUser(ctx context.Context, site string, d *unifi.User) (*unifi.User, error) {
+func (c *lazyClient) UpdateClient(ctx context.Context, site string, d *unifi.Client) (*unifi.Client, error) {
 	if err := c.init(ctx); err != nil {
 		return nil, err
 	}
-	return c.inner.UpdateUser(ctx, site, d)
+	return c.inner.UpdateClient(ctx, site, d)
 }
-func (c *lazyClient) DeleteUserByMAC(ctx context.Context, site, mac string) error {
+func (c *lazyClient) DeleteClientByMAC(ctx context.Context, site, mac string) error {
 	if err := c.init(ctx); err != nil {
 		return err
 	}
-	return c.inner.DeleteUserByMAC(ctx, site, mac)
+	return c.inner.DeleteClientByMAC(ctx, site, mac)
 }
-func (c *lazyClient) BlockUserByMAC(ctx context.Context, site, mac string) error {
+func (c *lazyClient) BlockClientByMAC(ctx context.Context, site, mac string) error {
 	if err := c.init(ctx); err != nil {
 		return err
 	}
-	return c.inner.BlockUserByMAC(ctx, site, mac)
+	return c.inner.BlockClientByMAC(ctx, site, mac)
 }
-func (c *lazyClient) UnblockUserByMAC(ctx context.Context, site, mac string) error {
+func (c *lazyClient) UnblockClientByMAC(ctx context.Context, site, mac string) error {
 	if err := c.init(ctx); err != nil {
 		return err
 	}
-	return c.inner.UnblockUserByMAC(ctx, site, mac)
-}
-func (c *lazyClient) OverrideUserFingerprint(ctx context.Context, site, mac string, devIdOveride int) error {
-	if err := c.init(ctx); err != nil {
-		return err
-	}
-	return c.inner.OverrideUserFingerprint(ctx, site, mac, devIdOveride)
+	return c.inner.UnblockClientByMAC(ctx, site, mac)
 }
 func (c *lazyClient) ListFirewallGroup(ctx context.Context, site string) ([]unifi.FirewallGroup, error) {
 	if err := c.init(ctx); err != nil {
@@ -552,40 +504,4 @@ func (c *lazyClient) UpdateDynamicDNS(ctx context.Context, site string, d *unifi
 		return nil, err
 	}
 	return c.inner.UpdateDynamicDNS(ctx, site, d)
-}
-func (c *lazyClient) GetSettingMgmt(ctx context.Context, site string) (*unifi.SettingMgmt, error) {
-	if err := c.init(ctx); err != nil {
-		return nil, err
-	}
-	return c.inner.GetSettingMgmt(ctx, site)
-}
-func (c *lazyClient) UpdateSettingMgmt(ctx context.Context, site string, d *unifi.SettingMgmt) (*unifi.SettingMgmt, error) {
-	if err := c.init(ctx); err != nil {
-		return nil, err
-	}
-	return c.inner.UpdateSettingMgmt(ctx, site, d)
-}
-func (c *lazyClient) GetSettingUsg(ctx context.Context, site string) (*unifi.SettingUsg, error) {
-	if err := c.init(ctx); err != nil {
-		return nil, err
-	}
-	return c.inner.GetSettingUsg(ctx, site)
-}
-func (c *lazyClient) UpdateSettingUsg(ctx context.Context, site string, d *unifi.SettingUsg) (*unifi.SettingUsg, error) {
-	if err := c.init(ctx); err != nil {
-		return nil, err
-	}
-	return c.inner.UpdateSettingUsg(ctx, site, d)
-}
-func (c *lazyClient) GetSettingRadius(ctx context.Context, site string) (*unifi.SettingRadius, error) {
-	if err := c.init(ctx); err != nil {
-		return nil, err
-	}
-	return c.inner.GetSettingRadius(ctx, site)
-}
-func (c *lazyClient) UpdateSettingRadius(ctx context.Context, site string, d *unifi.SettingRadius) (*unifi.SettingRadius, error) {
-	if err := c.init(ctx); err != nil {
-		return nil, err
-	}
-	return c.inner.UpdateSettingRadius(ctx, site, d)
 }

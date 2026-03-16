@@ -6,7 +6,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	"github.com/paultyng/go-unifi/unifi"
+	"github.com/ubiquiti-community/go-unifi/unifi"
 )
 
 func resourceAccount() *schema.Resource {
@@ -169,11 +169,13 @@ func resourceAccountSetResourceData(resp *unifi.Account, d *schema.ResourceData,
 }
 
 func resourceAccountGetResourceData(d *schema.ResourceData) (*unifi.Account, error) {
+	tunnelType := int64(d.Get("tunnel_type").(int))
+	tunnelMediumType := int64(d.Get("tunnel_medium_type").(int))
 	return &unifi.Account{
 		Name:             d.Get("name").(string),
 		XPassword:        d.Get("password").(string),
-		TunnelType:       d.Get("tunnel_type").(int),
-		TunnelMediumType: d.Get("tunnel_medium_type").(int),
+		TunnelType:       &tunnelType,
+		TunnelMediumType: &tunnelMediumType,
 		NetworkID:        d.Get("network_id").(string),
 	}, nil
 }

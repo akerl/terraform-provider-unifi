@@ -10,7 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	"github.com/paultyng/go-unifi/unifi"
+	"github.com/ubiquiti-community/go-unifi/unifi"
 )
 
 func resourceDevice() *schema.Resource {
@@ -335,7 +335,8 @@ func setToPortOverrides(set *schema.Set) ([]unifi.DevicePortOverrides, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unable to create port override: %w", err)
 		}
-		overrideMap[po.PortIDX] = po
+
+		overrideMap[int(*po.PortIDX)] = po
 	}
 
 	pos := make([]unifi.DevicePortOverrides, 0, len(overrideMap))
@@ -358,22 +359,22 @@ func setFromPortOverrides(pos []unifi.DevicePortOverrides) ([]map[string]interfa
 }
 
 func toPortOverride(data map[string]interface{}) (unifi.DevicePortOverrides, error) {
-	idx := data["number"].(int)
+	idx := int64(data["number"].(int))
 	name := data["name"].(string)
 	profileID := data["port_profile_id"].(string)
 	opMode := data["op_mode"].(string)
 	poeMode := data["poe_mode"].(string)
 
 	aggregateMembersRaw := data["aggregate_members"].([]interface{})
-	aggregateMembers := []int{}
+	aggregateMembers := []int64{}
 	for _, v := range aggregateMembersRaw {
-		aggregateMembers = append(aggregateMembers, v.(int))
+		aggregateMembers = append(aggregateMembers, v.(int64))
 	}
 
 	nativeNetworkID := data["native_network_id"].(string)
 
 	return unifi.DevicePortOverrides{
-		PortIDX:          idx,
+		PortIDX:          &idx,
 		Name:             name,
 		PortProfileID:    profileID,
 		OpMode:           opMode,

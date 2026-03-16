@@ -2,12 +2,15 @@ package container
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 
 	"github.com/docker/cli/cli"
 	"github.com/docker/cli/cli/command"
 	"github.com/docker/cli/cli/command/completion"
-	"github.com/pkg/errors"
+	"github.com/moby/moby/client"
+	"github.com/moby/sys/atomicwriter"
 	"github.com/spf13/cobra"
 )
 
@@ -16,8 +19,8 @@ type exportOptions struct {
 	output    string
 }
 
-// NewExportCommand creates a new `docker export` command
-func NewExportCommand(dockerCli command.Cli) *cobra.Command {
+// newExportCommand creates a new "docker container export" command.
+func newExportCommand(dockerCLI command.Cli) *cobra.Command {
 	var opts exportOptions
 
 	cmd := &cobra.Command{
@@ -26,12 +29,13 @@ func NewExportCommand(dockerCli command.Cli) *cobra.Command {
 		Args:  cli.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.container = args[0]
-			return runExport(cmd.Context(), dockerCli, opts)
+			return runExport(cmd.Context(), dockerCLI, opts)
 		},
 		Annotations: map[string]string{
 			"aliases": "docker container export, docker export",
 		},
-		ValidArgsFunction: completion.ContainerNames(dockerCli, true),
+		ValidArgsFunction:     completion.ContainerNames(dockerCLI, true),
+		DisableFlagsInUseLine: true,
 	}
 
 	flags := cmd.Flags()
@@ -41,27 +45,28 @@ func NewExportCommand(dockerCli command.Cli) *cobra.Command {
 	return cmd
 }
 
-func runExport(ctx context.Context, dockerCli command.Cli, opts exportOptions) error {
-	if opts.output == "" && dockerCli.Out().IsTerminal() {
-		return errors.New("cowardly refusing to save to a terminal. Use the -o flag or redirect")
+func runExport(ctx context.Context, dockerCLI command.Cli, opts exportOptions) error {
+	var output io.Writer
+	if opts.output == "" {
+		if dockerCLI.Out().IsTerminal() {
+			return errors.New("cowardly refusing to save to a terminal. Use the -o flag or redirect")
+		}
+		output = dockerCLI.Out()
+	} else {
+		writer, err := atomicwriter.New(opts.output, 0o600)
+		if err != nil {
+			return fmt.Errorf("failed to export container: %w", err)
+		}
+		defer writer.Close()
+		output = writer
 	}
 
-	if err := command.ValidateOutputPath(opts.output); err != nil {
-		return errors.Wrap(err, "failed to export container")
-	}
-
-	clnt := dockerCli.Client()
-
-	responseBody, err := clnt.ContainerExport(ctx, opts.container)
+	responseBody, err := dockerCLI.Client().ContainerExport(ctx, opts.container, client.ContainerExportOptions{})
 	if err != nil {
 		return err
 	}
 	defer responseBody.Close()
 
-	if opts.output == "" {
-		_, err := io.Copy(dockerCli.Out(), responseBody)
-		return err
-	}
-
-	return command.CopyToFile(opts.output, responseBody)
+	_, err = io.Copy(output, responseBody)
+	return err
 }

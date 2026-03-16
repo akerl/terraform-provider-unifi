@@ -48,7 +48,7 @@ func dataAPGroupRead(ctx context.Context, d *schema.ResourceData, meta interface
 		return diag.FromErr(err)
 	}
 	for _, g := range groups {
-		if (name == "" && g.HiddenID == "default") || g.Name == name {
+		if (name == "" && g.HiddenId == "default") || g.Name == name {
 			d.SetId(g.ID)
 			d.Set("site", site)
 			return nil

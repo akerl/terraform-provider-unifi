@@ -3,17 +3,16 @@ package command
 import (
 	"context"
 	"encoding/csv"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/docker/cli/cli/streams"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
+	"github.com/moby/moby/client"
 	"github.com/moby/term"
-	"github.com/pkg/errors"
 )
 
 // CLIOption is a functional argument to apply options to a [DockerCli]. These
@@ -76,32 +75,11 @@ func WithErrorStream(err io.Writer) CLIOption {
 	}
 }
 
-// WithContentTrustFromEnv enables content trust on a cli from environment variable DOCKER_CONTENT_TRUST value.
-func WithContentTrustFromEnv() CLIOption {
-	return func(cli *DockerCli) error {
-		cli.contentTrust = false
-		if e := os.Getenv("DOCKER_CONTENT_TRUST"); e != "" {
-			if t, err := strconv.ParseBool(e); t || err != nil {
-				// treat any other value as true
-				cli.contentTrust = true
-			}
-		}
-		return nil
-	}
-}
-
-// WithContentTrust enables content trust on a cli.
-func WithContentTrust(enabled bool) CLIOption {
-	return func(cli *DockerCli) error {
-		cli.contentTrust = enabled
-		return nil
-	}
-}
-
 // WithDefaultContextStoreConfig configures the cli to use the default context store configuration.
 func WithDefaultContextStoreConfig() CLIOption {
 	return func(cli *DockerCli) error {
-		cli.contextStoreConfig = DefaultContextStoreConfig()
+		cfg := DefaultContextStoreConfig()
+		cli.contextStoreConfig = &cfg
 		return nil
 	}
 }
@@ -110,6 +88,28 @@ func WithDefaultContextStoreConfig() CLIOption {
 func WithAPIClient(c client.APIClient) CLIOption {
 	return func(cli *DockerCli) error {
 		cli.client = c
+		return nil
+	}
+}
+
+// WithInitializeClient is passed to [DockerCli.Initialize] to initialize
+// an API Client for use by the CLI.
+func WithInitializeClient(makeClient func(*DockerCli) (client.APIClient, error)) CLIOption {
+	return func(cli *DockerCli) error {
+		c, err := makeClient(cli)
+		if err != nil {
+			return err
+		}
+		return WithAPIClient(c)(cli)
+	}
+}
+
+// WithAPIClientOptions configures additional [client.Opt] to use when
+// initializing the API client. These options have no effect if a custom
+// client is set (through [WithAPIClient] or [WithInitializeClient]).
+func WithAPIClientOptions(c ...client.Opt) CLIOption {
+	return func(cli *DockerCli) error {
+		cli.clientOpts = append(cli.clientOpts, c...)
 		return nil
 	}
 }
@@ -168,61 +168,70 @@ const envOverrideHTTPHeaders = "DOCKER_CUSTOM_HEADERS"
 // override headers with the same name).
 //
 // TODO(thaJeztah): this is a client Option, and should be moved to the client. It is non-exported for that reason.
-func withCustomHeadersFromEnv() client.Opt {
-	return func(apiClient *client.Client) error {
-		value := os.Getenv(envOverrideHTTPHeaders)
-		if value == "" {
-			return nil
-		}
-		csvReader := csv.NewReader(strings.NewReader(value))
-		fields, err := csvReader.Read()
-		if err != nil {
-			return errdefs.InvalidParameter(errors.Errorf(
-				"failed to parse custom headers from %s environment variable: value must be formatted as comma-separated key=value pairs",
-				envOverrideHTTPHeaders,
+func withCustomHeadersFromEnv() (client.Opt, error) {
+	value := os.Getenv(envOverrideHTTPHeaders)
+	if value == "" {
+		return nil, nil
+	}
+	csvReader := csv.NewReader(strings.NewReader(value))
+	fields, err := csvReader.Read()
+	if err != nil {
+		return nil, invalidParameter(fmt.Errorf(
+			"failed to parse custom headers from %s environment variable: value must be formatted as comma-separated key=value pairs",
+			envOverrideHTTPHeaders,
+		))
+	}
+	if len(fields) == 0 {
+		return nil, nil
+	}
+
+	env := map[string]string{}
+	for _, kv := range fields {
+		k, v, hasValue := strings.Cut(kv, "=")
+
+		// Only strip whitespace in keys; preserve whitespace in values.
+		k = strings.TrimSpace(k)
+
+		if k == "" {
+			return nil, invalidParameter(fmt.Errorf(
+				`failed to set custom headers from %s environment variable: value contains a key=value pair with an empty key: '%s'`,
+				envOverrideHTTPHeaders, kv,
 			))
 		}
-		if len(fields) == 0 {
-			return nil
+
+		// We don't currently allow empty key=value pairs, and produce an error.
+		// This is something we could allow in future (e.g. to read value
+		// from an environment variable with the same name). In the meantime,
+		// produce an error to prevent users from depending on this.
+		if !hasValue {
+			return nil, invalidParameter(fmt.Errorf(
+				`failed to set custom headers from %s environment variable: missing "=" in key=value pair: '%s'`,
+				envOverrideHTTPHeaders, kv,
+			))
 		}
 
-		env := map[string]string{}
-		for _, kv := range fields {
-			k, v, hasValue := strings.Cut(kv, "=")
+		env[http.CanonicalHeaderKey(k)] = v
+	}
 
-			// Only strip whitespace in keys; preserve whitespace in values.
-			k = strings.TrimSpace(k)
+	if len(env) == 0 {
+		// We should probably not hit this case, as we don't skip values
+		// (only return errors), but we don't want to discard existing
+		// headers with an empty set.
+		return nil, nil
+	}
 
-			if k == "" {
-				return errdefs.InvalidParameter(errors.Errorf(
-					`failed to set custom headers from %s environment variable: value contains a key=value pair with an empty key: '%s'`,
-					envOverrideHTTPHeaders, kv,
-				))
-			}
+	// TODO(thaJeztah): add a client.WithExtraHTTPHeaders() function to allow these headers to be _added_ to existing ones, instead of _replacing_
+	//  see https://github.com/docker/cli/pull/5098#issuecomment-2147403871  (when updating, also update the WARNING in the function and env-var GoDoc)
+	return client.WithHTTPHeaders(env), nil
+}
 
-			// We don't currently allow empty key=value pairs, and produce an error.
-			// This is something we could allow in future (e.g. to read value
-			// from an environment variable with the same name). In the meantime,
-			// produce an error to prevent users from depending on this.
-			if !hasValue {
-				return errdefs.InvalidParameter(errors.Errorf(
-					`failed to set custom headers from %s environment variable: missing "=" in key=value pair: '%s'`,
-					envOverrideHTTPHeaders, kv,
-				))
-			}
-
-			env[http.CanonicalHeaderKey(k)] = v
+// WithUserAgent configures the User-Agent string for cli HTTP requests.
+func WithUserAgent(userAgent string) CLIOption {
+	return func(cli *DockerCli) error {
+		if userAgent == "" {
+			return errors.New("user agent cannot be blank")
 		}
-
-		if len(env) == 0 {
-			// We should probably not hit this case, as we don't skip values
-			// (only return errors), but we don't want to discard existing
-			// headers with an empty set.
-			return nil
-		}
-
-		// TODO(thaJeztah): add a client.WithExtraHTTPHeaders() function to allow these headers to be _added_ to existing ones, instead of _replacing_
-		//  see https://github.com/docker/cli/pull/5098#issuecomment-2147403871  (when updating, also update the WARNING in the function and env-var GoDoc)
-		return client.WithHTTPHeaders(env)(apiClient)
+		cli.clientOpts = append(cli.clientOpts, client.WithUserAgent(userAgent))
+		return nil
 	}
 }

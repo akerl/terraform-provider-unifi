@@ -8,7 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	"github.com/paultyng/go-unifi/unifi"
+	"github.com/ubiquiti-community/go-unifi/unifi"
 )
 
 var firewallRuleProtocolRegexp = regexp.MustCompile("^$|all|([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])|tcp_udp|ah|ax.25|dccp|ddp|egp|eigrp|encap|esp|etherip|fc|ggp|gre|hip|hmp|icmp|idpr-cmtp|idrp|igmp|igp|ip|ipcomp|ipencap|ipip|ipv6|ipv6-frag|ipv6-icmp|ipv6-nonxt|ipv6-opts|ipv6-route|isis|iso-tp4|l2tp|manet|mobility-header|mpls-in-ip|ospf|pim|pup|rdp|rohc|rspf|rsvp|sctp|shim6|skip|st|tcp|udp|udplite|vmtp|vrrp|wesp|xns-idp|xtp")
@@ -248,12 +248,14 @@ func resourceFirewallRuleGetResourceData(d *schema.ResourceData) (*unifi.Firewal
 		return nil, err
 	}
 
+	ruleIndex := d.Get("rule_index").(int64)
+
 	return &unifi.FirewallRule{
 		Enabled:          d.Get("enabled").(bool),
 		Name:             d.Get("name").(string),
 		Action:           d.Get("action").(string),
 		Ruleset:          d.Get("ruleset").(string),
-		RuleIndex:        d.Get("rule_index").(int),
+		RuleIndex:        &ruleIndex,
 		Protocol:         d.Get("protocol").(string),
 		ProtocolV6:       d.Get("protocol_v6").(string),
 		ICMPTypename:     d.Get("icmp_typename").(string),

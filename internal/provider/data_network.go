@@ -296,7 +296,7 @@ func dataNetworkRead(ctx context.Context, d *schema.ResourceData, meta interface
 		return diag.FromErr(err)
 	}
 	for _, n := range networks {
-		if (name != "" && n.Name == name) || (id != "" && n.ID == id) {
+		if (name != "" && *n.Name == name) || (id != "" && n.ID == id) {
 			dhcpDNS := []string{}
 			for _, dns := range []string{
 				n.DHCPDDNS1,
@@ -311,8 +311,8 @@ func dataNetworkRead(ctx context.Context, d *schema.ResourceData, meta interface
 			}
 			wanDNS := []string{}
 			for _, dns := range []string{
-				n.WANDNS1,
-				n.WANDNS2,
+				*n.WANDNS1,
+				*n.WANDNS2,
 				n.WANDNS3,
 				n.WANDNS4,
 			} {
@@ -327,7 +327,7 @@ func dataNetworkRead(ctx context.Context, d *schema.ResourceData, meta interface
 			d.Set("name", n.Name)
 			d.Set("purpose", n.Purpose)
 			d.Set("vlan_id", n.VLAN)
-			d.Set("subnet", cidrZeroBased(n.IPSubnet))
+			d.Set("subnet", cidrZeroBased(*n.IPSubnet))
 			d.Set("network_group", n.NetworkGroup)
 			d.Set("dhcp_dns", dhcpDNS)
 			d.Set("dhcp_start", n.DHCPDStart)

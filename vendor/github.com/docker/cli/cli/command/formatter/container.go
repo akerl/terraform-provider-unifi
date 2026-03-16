@@ -1,5 +1,5 @@
 // FIXME(thaJeztah): remove once we are a module; the go:build directive prevents go from downgrading language version to go1.16:
-//go:build go1.22
+//go:build go1.24
 
 package formatter
 
@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/platforms"
 	"github.com/distribution/reference"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/go-units"
+	"github.com/moby/moby/api/types/container"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 const (
@@ -26,7 +27,17 @@ const (
 	mountsHeader     = "MOUNTS"
 	localVolumes     = "LOCAL VOLUMES"
 	networksHeader   = "NETWORKS"
+	platformHeader   = "PLATFORM"
 )
+
+// Platform wraps a [ocispec.Platform] to implement the stringer interface.
+type Platform struct {
+	ocispec.Platform
+}
+
+func (p Platform) String() string {
+	return platforms.FormatAll(p.Platform)
+}
 
 // NewContainerFormat returns a Format for rendering using a Context
 func NewContainerFormat(source string, quiet bool, size bool) Format {
@@ -68,16 +79,14 @@ ports: {{- pad .Ports 1 0}}
 
 // ContainerWrite renders the context for a list of containers
 func ContainerWrite(ctx Context, containers []container.Summary) error {
-	render := func(format func(subContext SubContext) error) error {
+	return ctx.Write(NewContainerContext(), func(format func(subContext SubContext) error) error {
 		for _, ctr := range containers {
-			err := format(&ContainerContext{trunc: ctx.Trunc, c: ctr})
-			if err != nil {
+			if err := format(&ContainerContext{trunc: ctx.Trunc, c: ctr}); err != nil {
 				return err
 			}
 		}
 		return nil
-	}
-	return ctx.Write(NewContainerContext(), render)
+	})
 }
 
 // ContainerContext is a struct used for rendering a list of containers in a Go template.
@@ -111,6 +120,7 @@ func NewContainerContext() *ContainerContext {
 		"Mounts":       mountsHeader,
 		"LocalVolumes": localVolumes,
 		"Networks":     networksHeader,
+		"Platform":     platformHeader,
 	}
 	return &containerCtx
 }
@@ -124,7 +134,7 @@ func (c *ContainerContext) MarshalJSON() ([]byte, error) {
 // option being set, the full or truncated ID is returned.
 func (c *ContainerContext) ID() string {
 	if c.trunc {
-		return stringid.TruncateID(c.c.ID)
+		return TruncateID(c.c.ID)
 	}
 	return c.c.ID
 }
@@ -160,27 +170,33 @@ func (c *ContainerContext) Image() string {
 	if c.c.Image == "" {
 		return "<no image>"
 	}
-	if c.trunc {
-		if trunc := stringid.TruncateID(c.c.ImageID); trunc == stringid.TruncateID(c.c.Image) {
-			return trunc
+	if !c.trunc {
+		return c.c.Image
+	}
+	if trunc := TruncateID(c.c.ImageID); trunc == TruncateID(c.c.Image) {
+		return trunc
+	}
+	ref, err := reference.ParseNormalizedNamed(c.c.Image)
+	if err != nil {
+		return c.c.Image
+	}
+
+	if _, ok := ref.(reference.Digested); ok {
+		// strip the digest, but preserve the tag (if any)
+		var tag string
+		if t, ok := ref.(reference.Tagged); ok {
+			tag = t.Tag()
 		}
-		// truncate digest if no-trunc option was not selected
-		ref, err := reference.ParseNormalizedNamed(c.c.Image)
-		if err == nil {
-			if nt, ok := ref.(reference.NamedTagged); ok {
-				// case for when a tag is provided
-				if namedTagged, err := reference.WithTag(reference.TrimNamed(nt), nt.Tag()); err == nil {
-					return reference.FamiliarString(namedTagged)
-				}
-			} else {
-				// case for when a tag is not provided
-				named := reference.TrimNamed(ref)
-				return reference.FamiliarString(named)
+		ref = reference.TrimNamed(ref)
+		if tag != "" {
+			if out, err := reference.WithTag(ref, tag); err == nil {
+				ref = out
 			}
 		}
 	}
 
-	return c.c.Image
+	// Format as "familiar" name with "docker.io[/library]" trimmed.
+	return reference.FamiliarString(ref)
 }
 
 // Command returns's the container's command. If the trunc option is set, the
@@ -210,6 +226,16 @@ func (c *ContainerContext) RunningFor() string {
 	return units.HumanDuration(time.Now().UTC().Sub(createdAt)) + " ago"
 }
 
+// Platform returns a human-readable representation of the container's
+// platform if it is available.
+func (c *ContainerContext) Platform() *Platform {
+	p := c.c.ImageManifestDescriptor
+	if p == nil || p.Platform == nil {
+		return nil
+	}
+	return &Platform{*p.Platform}
+}
+
 // Ports returns a comma-separated string representing open ports of the container
 // e.g. "0.0.0.0:80->9090/tcp, 9988/tcp"
 // it's used by command 'docker ps'
@@ -218,9 +244,10 @@ func (c *ContainerContext) Ports() string {
 	return DisplayablePorts(c.c.Ports)
 }
 
-// State returns the container's current state (e.g. "running" or "paused")
+// State returns the container's current state (e.g. "running" or "paused").
+// Refer to [container.ContainerState] for possible states.
 func (c *ContainerContext) State() string {
-	return c.c.State
+	return string(c.c.State)
 }
 
 // Status returns the container's status in a human readable form (for example,
@@ -255,6 +282,7 @@ func (c *ContainerContext) Labels() string {
 	for k, v := range c.c.Labels {
 		joinLabels = append(joinLabels, k+"="+v)
 	}
+	sort.Strings(joinLabels)
 	return strings.Join(joinLabels, ",")
 }
 
@@ -316,7 +344,7 @@ func (c *ContainerContext) Networks() string {
 // DisplayablePorts returns formatted string representing open ports of container
 // e.g. "0.0.0.0:80->9090/tcp, 9988/tcp"
 // it's used by command 'docker ps'
-func DisplayablePorts(ports []container.Port) string {
+func DisplayablePorts(ports []container.PortSummary) string {
 	type portGroup struct {
 		first uint16
 		last  uint16
@@ -332,13 +360,13 @@ func DisplayablePorts(ports []container.Port) string {
 	for _, port := range ports {
 		current := port.PrivatePort
 		portKey := port.Type
-		if port.IP != "" {
+		if port.IP.IsValid() {
 			if port.PublicPort != current {
-				hAddrPort := net.JoinHostPort(port.IP, strconv.Itoa(int(port.PublicPort)))
+				hAddrPort := net.JoinHostPort(port.IP.String(), strconv.Itoa(int(port.PublicPort)))
 				hostMappings = append(hostMappings, fmt.Sprintf("%s->%d/%s", hAddrPort, port.PrivatePort, port.Type))
 				continue
 			}
-			portKey = port.IP + "/" + port.Type
+			portKey = port.IP.String() + "/" + port.Type
 		}
 		group := groupMap[portKey]
 
@@ -382,13 +410,13 @@ func formGroup(key string, start, last uint16) string {
 	return group + "/" + groupType
 }
 
-func comparePorts(i, j container.Port) bool {
+func comparePorts(i, j container.PortSummary) bool {
 	if i.PrivatePort != j.PrivatePort {
 		return i.PrivatePort < j.PrivatePort
 	}
 
 	if i.IP != j.IP {
-		return i.IP < j.IP
+		return i.IP.String() < j.IP.String()
 	}
 
 	if i.PublicPort != j.PublicPort {

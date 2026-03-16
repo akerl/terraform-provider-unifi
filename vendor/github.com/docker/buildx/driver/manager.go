@@ -6,10 +6,10 @@ import (
 	"sync"
 
 	"github.com/docker/cli/cli/context/store"
-	dockerclient "github.com/docker/docker/client"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/util/tracing/delegated"
-	specs "github.com/opencontainers/image-spec/specs-go/v1"
+	dockerclient "github.com/moby/moby/client"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
 
@@ -30,12 +30,13 @@ type InitConfig struct {
 	Name            string
 	EndpointAddr    string
 	DockerAPI       dockerclient.APIClient
+	DockerContext   string
 	ContextStore    store.Reader
 	BuildkitdFlags  []string
 	Files           map[string][]byte
 	DriverOpts      map[string]string
 	Auth            Auth
-	Platforms       []specs.Platform
+	Platforms       []ocispecs.Platform
 	ContextPathHash string
 	DialMeta        map[string][]string
 }

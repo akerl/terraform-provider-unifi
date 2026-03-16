@@ -122,6 +122,7 @@ func (b *Builder) LoadNodes(ctx context.Context, opts ...LoadNodesOption) (_ []N
 					Name:            driver.BuilderName(n.Name),
 					EndpointAddr:    n.Endpoint,
 					DockerAPI:       dockerapi,
+					DockerContext:   b.opts.dockerCli.CurrentContext(),
 					ContextStore:    b.opts.dockerCli.ContextStore(),
 					BuildkitdFlags:  n.BuildkitdFlags,
 					Files:           n.Files,
@@ -183,7 +184,7 @@ func (b *Builder) LoadNodes(ctx context.Context, opts ...LoadNodesOption) (_ []N
 			// not append (remove the static nodes in the store)
 			b.NodeGroup.Nodes = dynamicNodes
 			b.nodes = nodes
-			b.NodeGroup.Dynamic = true
+			b.Dynamic = true
 		}
 	}
 

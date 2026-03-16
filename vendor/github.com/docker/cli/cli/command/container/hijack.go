@@ -8,9 +8,8 @@ import (
 	"sync"
 
 	"github.com/docker/cli/cli/command"
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/pkg/ioutils"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/client"
 	"github.com/moby/term"
 	"github.com/sirupsen/logrus"
 )
@@ -18,6 +17,28 @@ import (
 // The default escape key sequence: ctrl-p, ctrl-q
 // TODO: This could be moved to `pkg/term`.
 var defaultEscapeKeys = []byte{16, 17}
+
+// readCloserWrapper wraps an io.Reader, and implements an io.ReadCloser
+// It calls the given callback function when closed.
+type readCloserWrapper struct {
+	io.Reader
+	closer func() error
+}
+
+// Close calls back the passed closer function
+func (r *readCloserWrapper) Close() error {
+	return r.closer()
+}
+
+func validateDetachKeys(keys string) error {
+	if keys == "" {
+		return nil
+	}
+	if _, err := term.ToBytes(keys); err != nil {
+		return invalidParameter(fmt.Errorf("invalid detach keys (%s): %w", keys, err))
+	}
+	return nil
+}
 
 // A hijackedIOStreamer handles copying input to and output from streams to the
 // connection.
@@ -27,7 +48,7 @@ type hijackedIOStreamer struct {
 	outputStream io.Writer
 	errorStream  io.Writer
 
-	resp types.HijackedResponse
+	resp client.HijackedResponse
 
 	tty        bool
 	detachKeys string
@@ -71,39 +92,41 @@ func (h *hijackedIOStreamer) stream(ctx context.Context) error {
 	}
 }
 
-func (h *hijackedIOStreamer) setupInput() (restore func(), err error) {
+func (h *hijackedIOStreamer) setupInput() (restore func(), _ error) {
 	if h.inputStream == nil || !h.tty {
 		// No need to setup input TTY.
 		// The restore func is a nop.
 		return func() {}, nil
 	}
-
+	if err := validateDetachKeys(h.detachKeys); err != nil {
+		return nil, err
+	}
 	if err := setRawTerminal(h.streams); err != nil {
 		return nil, fmt.Errorf("unable to set IO streams as raw terminal: %s", err)
 	}
 
 	// Use sync.Once so we may call restore multiple times but ensure we
 	// only restore the terminal once.
-	var restoreOnce sync.Once
-	restore = func() {
-		restoreOnce.Do(func() {
-			_ = restoreTerminal(h.streams, h.inputStream)
-		})
-	}
+	restore = sync.OnceFunc(func() {
+		_ = restoreTerminal(h.streams, h.inputStream)
+	})
 
 	// Wrap the input to detect detach escape sequence.
 	// Use default escape keys if an invalid sequence is given.
 	escapeKeys := defaultEscapeKeys
 	if h.detachKeys != "" {
-		customEscapeKeys, err := term.ToBytes(h.detachKeys)
+		var err error
+		escapeKeys, err = term.ToBytes(h.detachKeys)
 		if err != nil {
-			logrus.Warnf("invalid detach escape keys, using default: %s", err)
-		} else {
-			escapeKeys = customEscapeKeys
+			restore()
+			return nil, err
 		}
 	}
 
-	h.inputStream = ioutils.NewReadCloserWrapper(term.NewEscapeProxy(h.inputStream, escapeKeys), h.inputStream.Close)
+	h.inputStream = &readCloserWrapper{
+		Reader: term.NewEscapeProxy(h.inputStream, escapeKeys),
+		closer: h.inputStream.Close,
+	}
 
 	return restore, nil
 }

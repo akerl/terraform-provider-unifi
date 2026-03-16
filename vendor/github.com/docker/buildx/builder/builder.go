@@ -25,6 +25,7 @@ import (
 	dopts "github.com/docker/cli/opts"
 	"github.com/google/shlex"
 	"github.com/moby/buildkit/util/progress/progressui"
+	dockerclient "github.com/moby/moby/client"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"github.com/tonistiigi/go-csvvalue"
@@ -122,7 +123,7 @@ func New(dockerCli command.Cli, opts ...Option) (_ *Builder, err error) {
 
 // Validate validates builder context
 func (b *Builder) Validate() error {
-	if b.NodeGroup != nil && b.NodeGroup.DockerContext {
+	if b.NodeGroup != nil && b.DockerContext {
 		list, err := b.opts.dockerCli.ContextStore().List()
 		if err != nil {
 			return err
@@ -144,7 +145,7 @@ func (b *Builder) ContextName() string {
 		return ""
 	}
 	for _, cb := range ctxbuilders {
-		if b.NodeGroup.Driver == "docker" && len(b.NodeGroup.Nodes) == 1 && b.NodeGroup.Nodes[0].Endpoint == cb.Name {
+		if b.Driver == "docker" && len(b.NodeGroup.Nodes) == 1 && b.NodeGroup.Nodes[0].Endpoint == cb.Name {
 			return cb.Name
 		}
 	}
@@ -247,14 +248,14 @@ func (b *Builder) Factory(ctx context.Context, dialMeta map[string][]string) (_ 
 			}
 			// check if endpoint is healthy is needed to determine the driver type.
 			// if this fails then can't continue with driver selection.
-			if _, err = dockerapi.Ping(ctx); err != nil {
+			if _, err = dockerapi.Ping(ctx, dockerclient.PingOptions{}); err != nil {
 				return
 			}
 			b.driverFactory.Factory, err = driver.GetDefaultFactory(ctx, ep, dockerapi, false, dialMeta)
 			if err != nil {
 				return
 			}
-			b.Driver = b.driverFactory.Factory.Name()
+			b.Driver = b.driverFactory.Name()
 		}
 	})
 	return b.driverFactory.Factory, err
@@ -268,7 +269,7 @@ func (b *Builder) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Name         string
 		Driver       string
-		LastActivity time.Time `json:",omitempty"`
+		LastActivity time.Time
 		Dynamic      bool
 		Nodes        []Node
 		Err          string `json:",omitempty"`
@@ -309,7 +310,7 @@ func GetBuilders(dockerCli command.Cli, txn *store.Txn) ([]*Builder, error) {
 			return nil, err
 		}
 		builders[i] = b
-		seen[b.NodeGroup.Name] = struct{}{}
+		seen[b.Name] = struct{}{}
 	}
 
 	for _, c := range contexts {
@@ -524,7 +525,7 @@ func Create(ctx context.Context, txn *store.Txn, dockerCli command.Cli, opts Cre
 	}
 
 	cancelCtx, cancel := context.WithCancelCause(ctx)
-	timeoutCtx, _ := context.WithTimeoutCause(cancelCtx, 20*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet,lostcancel // no need to manually cancel this context as we already rely on parent
+	timeoutCtx, _ := context.WithTimeoutCause(cancelCtx, 20*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet // no need to manually cancel this context as we already rely on parent
 	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	nodes, err := b.LoadNodes(timeoutCtx, WithData())

@@ -7,7 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/paultyng/go-unifi/unifi"
+	"github.com/ubiquiti-community/go-unifi/unifi"
 )
 
 func init() {
@@ -73,8 +73,8 @@ func New(version string) func() *schema.Provider {
 				"unifi_network":        dataNetwork(),
 				"unifi_port_profile":   dataPortProfile(),
 				"unifi_radius_profile": dataRADIUSProfile(),
-				"unifi_user_group":     dataUserGroup(),
-				"unifi_user":           dataUser(),
+				"unifi_client_group":   dataClientGroup(),
+				"unifi_client":         dataClient(),
 				"unifi_account":        dataAccount(),
 			},
 			ResourcesMap: map[string]*schema.Resource{
@@ -89,14 +89,10 @@ func New(version string) func() *schema.Provider {
 				"unifi_radius_profile": resourceRadiusProfile(),
 				"unifi_site":           resourceSite(),
 				"unifi_static_route":   resourceStaticRoute(),
-				"unifi_user_group":     resourceUserGroup(),
-				"unifi_user":           resourceUser(),
+				"unifi_client_group":   resourceClientGroup(),
+				"unifi_client":         resourceClient(),
 				"unifi_wlan":           resourceWLAN(),
 				"unifi_account":        resourceAccount(),
-
-				"unifi_setting_mgmt":   resourceSettingMgmt(),
-				"unifi_setting_radius": resourceSettingRadius(),
-				"unifi_setting_usg":    resourceSettingUsg(),
 			},
 		}
 
@@ -130,11 +126,11 @@ func configure(version string, p *schema.Provider) schema.ConfigureContextFunc {
 type unifiClient interface {
 	Version() string
 
-	ListUserGroup(ctx context.Context, site string) ([]unifi.UserGroup, error)
-	DeleteUserGroup(ctx context.Context, site, id string) error
-	CreateUserGroup(ctx context.Context, site string, d *unifi.UserGroup) (*unifi.UserGroup, error)
-	GetUserGroup(ctx context.Context, site, id string) (*unifi.UserGroup, error)
-	UpdateUserGroup(ctx context.Context, site string, d *unifi.UserGroup) (*unifi.UserGroup, error)
+	ListClientGroup(ctx context.Context, site string) ([]unifi.ClientGroup, error)
+	DeleteClientGroup(ctx context.Context, site, id string) error
+	CreateClientGroup(ctx context.Context, site string, d *unifi.ClientGroup) (*unifi.ClientGroup, error)
+	GetClientGroup(ctx context.Context, site, id string) (*unifi.ClientGroup, error)
+	UpdateClientGroup(ctx context.Context, site string, d *unifi.ClientGroup) (*unifi.ClientGroup, error)
 
 	ListFirewallGroup(ctx context.Context, site string) ([]unifi.FirewallGroup, error)
 	DeleteFirewallGroup(ctx context.Context, site, id string) error
@@ -172,14 +168,13 @@ type unifiClient interface {
 	AdoptDevice(ctx context.Context, site, mac string) error
 	ForgetDevice(ctx context.Context, site, mac string) error
 
-	GetUser(ctx context.Context, site, id string) (*unifi.User, error)
-	GetUserByMAC(ctx context.Context, site, mac string) (*unifi.User, error)
-	CreateUser(ctx context.Context, site string, d *unifi.User) (*unifi.User, error)
-	BlockUserByMAC(ctx context.Context, site, mac string) error
-	UnblockUserByMAC(ctx context.Context, site, mac string) error
-	OverrideUserFingerprint(ctx context.Context, site, mac string, devIdOveride int) error
-	UpdateUser(ctx context.Context, site string, d *unifi.User) (*unifi.User, error)
-	DeleteUserByMAC(ctx context.Context, site, mac string) error
+	GetClient(ctx context.Context, site, id string) (*unifi.Client, error)
+	GetClientByMAC(ctx context.Context, site, mac string) (*unifi.Client, error)
+	CreateClient(ctx context.Context, site string, d *unifi.Client) (*unifi.Client, error)
+	BlockClientByMAC(ctx context.Context, site, mac string) error
+	UnblockClientByMAC(ctx context.Context, site, mac string) error
+	UpdateClient(ctx context.Context, site string, d *unifi.Client) (*unifi.Client, error)
+	DeleteClientByMAC(ctx context.Context, site, mac string) error
 
 	GetPortForward(ctx context.Context, site, id string) (*unifi.PortForward, error)
 	DeletePortForward(ctx context.Context, site, id string) error
@@ -221,14 +216,6 @@ type unifiClient interface {
 	DeleteDynamicDNS(ctx context.Context, site, id string) error
 	CreateDynamicDNS(ctx context.Context, site string, d *unifi.DynamicDNS) (*unifi.DynamicDNS, error)
 	UpdateDynamicDNS(ctx context.Context, site string, d *unifi.DynamicDNS) (*unifi.DynamicDNS, error)
-
-	GetSettingMgmt(ctx context.Context, id string) (*unifi.SettingMgmt, error)
-	GetSettingUsg(ctx context.Context, id string) (*unifi.SettingUsg, error)
-	UpdateSettingMgmt(ctx context.Context, site string, d *unifi.SettingMgmt) (*unifi.SettingMgmt, error)
-	UpdateSettingUsg(ctx context.Context, site string, d *unifi.SettingUsg) (*unifi.SettingUsg, error)
-
-	GetSettingRadius(ctx context.Context, id string) (*unifi.SettingRadius, error)
-	UpdateSettingRadius(ctx context.Context, site string, d *unifi.SettingRadius) (*unifi.SettingRadius, error)
 }
 
 type client struct {
