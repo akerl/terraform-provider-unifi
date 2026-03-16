@@ -178,17 +178,17 @@ func setToAcctServers(set []interface{}) ([]unifi.RADIUSProfileAcctServers, erro
 
 func toAuthServer(data map[string]interface{}) (unifi.RADIUSProfileAuthServers, error) {
 	return unifi.RADIUSProfileAuthServers{
-		IP:      data["ip"].(string),
-		Port:    i64ptr(data["port"].(int64)),
-		XSecret: data["xsecret"].(string),
+		IP:     data["ip"].(string),
+		Port:   i64ptr(data["port"].(int64)),
+		Secret: data["xsecret"].(string),
 	}, nil
 }
 
 func toAcctServer(data map[string]interface{}) (unifi.RADIUSProfileAcctServers, error) {
 	return unifi.RADIUSProfileAcctServers{
-		IP:      data["ip"].(string),
-		Port:    i64ptr(data["port"].(int64)),
-		XSecret: data["xsecret"].(string),
+		IP:     data["ip"].(string),
+		Port:   i64ptr(data["port"].(int64)),
+		Secret: data["xsecret"].(string),
 	}, nil
 }
 
@@ -220,7 +220,7 @@ func fromAuthServer(sshKey unifi.RADIUSProfileAuthServers) (map[string]interface
 	return map[string]interface{}{
 		"ip":      sshKey.IP,
 		"port":    sshKey.Port,
-		"xsecret": sshKey.XSecret,
+		"xsecret": sshKey.Secret,
 	}, nil
 }
 
@@ -228,7 +228,7 @@ func fromAcctServer(sshKey unifi.RADIUSProfileAcctServers) (map[string]interface
 	return map[string]interface{}{
 		"ip":      sshKey.IP,
 		"port":    sshKey.Port,
-		"xsecret": sshKey.XSecret,
+		"xsecret": sshKey.Secret,
 	}, nil
 }
 

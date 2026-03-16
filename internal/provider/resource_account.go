@@ -161,7 +161,7 @@ func resourceAccountRead(ctx context.Context, d *schema.ResourceData, meta inter
 func resourceAccountSetResourceData(resp *unifi.Account, d *schema.ResourceData, site string) diag.Diagnostics {
 	d.Set("site", site)
 	d.Set("name", resp.Name)
-	d.Set("password", resp.XPassword)
+	d.Set("password", resp.Password)
 	d.Set("tunnel_type", resp.TunnelType)
 	d.Set("tunnel_medium_type", resp.TunnelMediumType)
 	d.Set("network_id", resp.NetworkID)
@@ -173,7 +173,7 @@ func resourceAccountGetResourceData(d *schema.ResourceData) (*unifi.Account, err
 	tunnelMediumType := int64(d.Get("tunnel_medium_type").(int))
 	return &unifi.Account{
 		Name:             d.Get("name").(string),
-		XPassword:        d.Get("password").(string),
+		Password:         d.Get("password").(string),
 		TunnelType:       &tunnelType,
 		TunnelMediumType: &tunnelMediumType,
 		NetworkID:        d.Get("network_id").(string),

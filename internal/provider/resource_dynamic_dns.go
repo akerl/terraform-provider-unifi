@@ -103,9 +103,9 @@ func resourceDynamicDNSGetResourceData(d *schema.ResourceData) (*unifi.DynamicDN
 
 		HostName: d.Get("host_name").(string),
 
-		Server:    d.Get("server").(string),
-		Login:     d.Get("login").(string),
-		XPassword: d.Get("password").(string),
+		Server:   d.Get("server").(string),
+		Login:    d.Get("login").(string),
+		Password: d.Get("password").(string),
 	}
 
 	return r, nil
@@ -119,7 +119,7 @@ func resourceDynamicDNSSetResourceData(resp *unifi.DynamicDNS, d *schema.Resourc
 
 	d.Set("server", resp.Server)
 	d.Set("login", resp.Login)
-	d.Set("password", resp.XPassword)
+	d.Set("password", resp.Password)
 
 	return nil
 }

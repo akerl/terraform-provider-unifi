@@ -353,7 +353,7 @@ func dataNetworkRead(ctx context.Context, d *schema.ResourceData, meta interface
 			d.Set("wan_networkgroup", n.WANNetworkGroup)
 			d.Set("wan_egress_qos", n.WANEgressQOS)
 			d.Set("wan_username", n.WANUsername)
-			d.Set("x_wan_password", n.XWANPassword)
+			d.Set("x_wan_password", n.WANPassword)
 			d.Set("wan_type_v6", n.WANTypeV6)
 			d.Set("wan_dhcp_v6_pd_size", n.WANDHCPv6PDSize)
 			d.Set("wan_ipv6", n.WANIPV6)

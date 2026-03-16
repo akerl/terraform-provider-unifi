@@ -498,7 +498,7 @@ func resourceNetworkGetResourceData(d *schema.ResourceData, meta interface{}) (*
 		WANNetworkGroup: sptr(d.Get("wan_networkgroup").(string)),
 		WANEgressQOS:    i64ptr(d.Get("wan_egress_qos").(int64)),
 		WANUsername:     d.Get("wan_username").(string),
-		XWANPassword:    d.Get("x_wan_password").(string),
+		WANPassword:     d.Get("x_wan_password").(string),
 
 		WANTypeV6:       sptr(d.Get("wan_type_v6").(string)),
 		WANDHCPv6PDSize: i64ptr(d.Get("wan_dhcp_v6_pd_size").(int64)),
@@ -658,7 +658,7 @@ func resourceNetworkSetResourceData(resp *unifi.Network, d *schema.ResourceData,
 	d.Set("wan_type_v6", resp.WANTypeV6)
 	d.Set("wan_type", wanType)
 	d.Set("wan_username", resp.WANUsername)
-	d.Set("x_wan_password", resp.XWANPassword)
+	d.Set("x_wan_password", resp.WANPassword)
 
 	return nil
 }

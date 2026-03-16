@@ -73,7 +73,7 @@ func dataAccountRead(ctx context.Context, d *schema.ResourceData, meta interface
 		if account.Name == name {
 			d.SetId(account.ID)
 			d.Set("name", account.Name)
-			d.Set("password", account.XPassword)
+			d.Set("password", account.Password)
 			d.Set("tunnel_type", account.TunnelType)
 			d.Set("tunnel_medium_type", account.TunnelMediumType)
 			d.Set("network_id", account.NetworkID)

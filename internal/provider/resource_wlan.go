@@ -311,7 +311,7 @@ func resourceWLANGetResourceData(d *schema.ResourceData, meta interface{}) (*uni
 
 	return &unifi.WLAN{
 		Name:                    d.Get("name").(string),
-		XPassphrase:             passphrase,
+		Passphrase:              passphrase,
 		HideSSID:                d.Get("hide_ssid").(bool),
 		IsGuest:                 d.Get("is_guest").(bool),
 		NetworkID:               networkID,
@@ -381,7 +381,7 @@ func resourceWLANCreate(ctx context.Context, d *schema.ResourceData, meta interf
 func resourceWLANSetResourceData(resp *unifi.WLAN, d *schema.ResourceData, meta interface{}, site string) diag.Diagnostics {
 	// c := meta.(*client)
 	security := resp.Security
-	passphrase := resp.XPassphrase
+	passphrase := resp.Passphrase
 	wpa3 := false
 	wpa3Transition := false
 	switch security {
