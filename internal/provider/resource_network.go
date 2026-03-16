@@ -542,16 +542,16 @@ func resourceNetworkSetResourceData(resp *unifi.Network, d *schema.ResourceData,
 	if resp.Purpose == "wan" {
 		wanType = *resp.WANType
 
-		for _, dns := range []string{
-			*resp.WANDNS1,
-			*resp.WANDNS2,
-			resp.WANDNS3,
-			resp.WANDNS4,
+		for _, dns := range []*string{
+			resp.WANDNS1,
+			resp.WANDNS2,
+			&resp.WANDNS3,
+			&resp.WANDNS4,
 		} {
-			if dns == "" {
+			if dns == nil {
 				continue
 			}
-			wanDNS = append(wanDNS, dns)
+			wanDNS = append(wanDNS, *dns)
 		}
 
 		if wanType != "dhcp" {
@@ -589,16 +589,16 @@ func resourceNetworkSetResourceData(resp *unifi.Network, d *schema.ResourceData,
 	}
 
 	dhcpV6DNS := []string{}
-	for _, dns := range []string{
-		*resp.DHCPDV6DNS1,
-		*resp.DHCPDV6DNS2,
-		*resp.DHCPDV6DNS3,
-		*resp.DHCPDV6DNS4,
+	for _, dns := range []*string{
+		resp.DHCPDV6DNS1,
+		resp.DHCPDV6DNS2,
+		resp.DHCPDV6DNS3,
+		resp.DHCPDV6DNS4,
 	} {
-		if dns == "" {
+		if dns == nil {
 			continue
 		}
-		dhcpV6DNS = append(dhcpV6DNS, dns)
+		dhcpV6DNS = append(dhcpV6DNS, *dns)
 	}
 
 	d.Set("site", site)
